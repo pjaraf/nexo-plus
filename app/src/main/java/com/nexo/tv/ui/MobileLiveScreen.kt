@@ -406,12 +406,7 @@ fun MobileLiveScreen(
             )
 
             // Controles táctiles embebidos
-            AnimatedVisibility(
-                visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.fillMaxSize()
-            ) {
+            if (showControls) {
                 Box(
                     Modifier
                         .fillMaxSize()
@@ -649,16 +644,18 @@ fun MobileLiveScreen(
                                 Modifier
                                     .fillMaxWidth()
                                     .height(64.dp)
-                                    .background(
+                                    .then(
                                         if (isPlaying) {
-                                            Brush.horizontalGradient(
-                                                listOf(
-                                                    Color(0xFFDE5B17),
-                                                    Color(0xFF8A2E05),
-                                                    Color(0xFF1E1C22)
+                                            Modifier.background(
+                                                Brush.horizontalGradient(
+                                                    listOf(
+                                                        Color(0xFFDE5B17),
+                                                        Color(0xFF8A2E05),
+                                                        Color(0xFF1E1C22)
+                                                    )
                                                 )
                                             )
-                                        } else Color.Transparent
+                                        } else Modifier
                                     )
                                     .clickable { onSelectChannel(ch) }
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
