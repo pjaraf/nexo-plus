@@ -1,7 +1,7 @@
 {
-  "versionCode": 2009,
-  "versionName": "2.2.50",
+  "versionCode": 2010,
+  "versionName": "2.2.51",
   "apkUrl": "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk",
-  "changelog": "Zapping ultrarrápido instantáneo con cancelación de stream previo, tcpNoDelay, probesize 32KB y buffer 0.",
+  "changelog": "Zapping ultrarrápido instantáneo con buffer optimizado, tcpNoDelay y decodificación por hardware inmediata.",
   "mandatory": false
 }

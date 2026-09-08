@@ -2,7 +2,6 @@ package com.nexo.tv.player
 
 import android.util.Log
 import com.nexo.tv.data.Http
-import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import java.io.BufferedReader
@@ -27,7 +26,6 @@ object StreamBridge {
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var port: Int = 0
     private var server: ServerSocket? = null
-    @Volatile private var activeCall: Call? = null
 
     @Synchronized
     fun start() {
@@ -62,12 +60,6 @@ object StreamBridge {
     /** Solo HTTPS necesita el puente; HTTP se reproduce directo. */
     fun maybeWrap(remoteUrl: String): String {
         return if (remoteUrl.startsWith("https://", true)) wrap(remoteUrl) else remoteUrl
-    }
-
-    /** Cancela de inmediato cualquier descarga activa del canal anterior */
-    fun cancelActive() {
-        try { activeCall?.cancel() } catch (_: Throwable) {}
-        activeCall = null
     }
 
     private fun handle(socket: Socket) {
@@ -106,12 +98,7 @@ object StreamBridge {
                 reqBuilder.header("Range", rangeHeader)
             }
 
-            val call = Http.client.newCall(reqBuilder.build())
-            // Cancelar canal previo para liberar ancho de banda al 100%
-            activeCall?.cancel()
-            activeCall = call
-
-            call.execute().use { resp ->
+            Http.client.newCall(reqBuilder.build()).execute().use { resp ->
                 if (!resp.isSuccessful && resp.code != 206) {
                     writeStatus(out, resp.code, "Error", emptyMap(), 0)
                     return
@@ -145,7 +132,7 @@ object StreamBridge {
                 } else {
                     val len = body.contentLength()
                     val headers = linkedMapOf<String, String>()
-                    headers["Content-Type"] = ctype.ifBlank { "video/mp2t" }
+                    headers["Content-Type"] = ctype.ifBlank { "application/octet-stream" }
                     headers["Accept-Ranges"] = "bytes"
                     resp.header("Content-Range")?.let { headers["Content-Range"] = it }
                     resp.header("Content-Length")?.let { headers["Content-Length"] = it }
@@ -160,20 +147,12 @@ object StreamBridge {
                         headers["Content-Length"] = declaredLen.toString()
                     }
                     writeStatus(out, status, reason, headers, if (headers.containsKey("Content-Length")) -2 else declaredLen)
-                    
-                    // Streaming directo a IjkPlayer con buffer optimizado de 32KB
-                    val inStream = body.byteStream()
-                    val buf = ByteArray(32 * 1024)
-                    var n: Int
-                    while (inStream.read(buf).also { n = it } != -1) {
-                        out.write(buf, 0, n)
-                        out.flush()
-                    }
+                    body.byteStream().copyTo(out)
+                    out.flush()
                 }
-                out.flush()
             }
         } catch (e: Throwable) {
-            // Cancelado intencionalmente al cambiar de canal o cerrado
+            // Socket cerrado normalmente al cambiar de canal
         } finally {
             try { socket.close() } catch (_: Throwable) {}
         }
@@ -207,8 +186,12 @@ object StreamBridge {
     ) {
         val sb = StringBuilder()
         sb.append("HTTP/1.1 ").append(status).append(" ").append(reason).append("\r\n")
-        headers.forEach { (k, v) -> sb.append(k).append(": ").append(v).append("\r\n") }
-        if (contentLength >= 0 && !headers.containsKey("Content-Length")) {
+        headers.forEach { (k, v) ->
+            if (!k.equals("Content-Length", true) || contentLength == -2) {
+                sb.append(k).append(": ").append(v).append("\r\n")
+            }
+        }
+        if (contentLength >= 0 && !headers.keys.any { it.equals("Content-Length", true) }) {
             sb.append("Content-Length: ").append(contentLength).append("\r\n")
         }
         sb.append("Connection: close\r\n\r\n")
