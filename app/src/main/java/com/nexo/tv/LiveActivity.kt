@@ -140,24 +140,13 @@ class LiveActivity : ComponentActivity() {
                 bannerTick++
             }
 
-            fun playChannel(ch: LiveChannel, instant: Boolean) {
+            fun playChannel(ch: LiveChannel, instant: Boolean = true) {
                 persistWatching(ch)
                 val remote = XtreamClient.liveUrl(ch.id)
-                val toPlay = StreamBridge.maybeWrap(remote)
-                android.util.Log.i("LiveActivity", "play $remote -> $toPlay")
+                android.util.Log.i("LiveActivity", "play $remote")
                 status = ch.name
                 revealBanner()
-                if (instant) engine.playNow(toPlay) else engine.playZap(toPlay)
-            }
-
-            fun warmNeighbors(around: Int) {
-                val list = activeChannels
-                if (list.size < 2) return
-                val n = list.size
-                // Rotación circular: último ↔ primero
-                listOf(list[(around + 1) % n], list[(around - 1 + n) % n]).forEach { ch ->
-                    StreamBridge.warm(XtreamClient.liveUrl(ch.id))
-                }
+                engine.playNow(remote)
             }
 
             fun selectCategory(catId: String) {
@@ -180,7 +169,6 @@ class LiveActivity : ComponentActivity() {
                 if (catId.isBlank()) {
                     prefs.edit().putString(KEY_CATEGORY, "").apply()
                 }
-                warmNeighbors(resumeIdx)
                 runCatching { rootFocus.requestFocus() }
             }
 
@@ -189,8 +177,7 @@ class LiveActivity : ComponentActivity() {
                 if (list.isEmpty()) return
                 // Loop: al pasar el último vuelve al primero (y viceversa).
                 index = (index + delta + list.size) % list.size
-                playChannel(list[index], instant = false)
-                warmNeighbors(index)
+                playChannel(list[index])
             }
 
             fun openCategories() {
@@ -261,7 +248,6 @@ class LiveActivity : ComponentActivity() {
                 if (start != null) {
                     index = playIdx
                     playChannel(start, instant = true)
-                    warmNeighbors(playIdx)
                 } else {
                     status = "Sin canales"
                 }

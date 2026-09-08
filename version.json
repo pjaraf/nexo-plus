@@ -1,7 +1,7 @@
 {
-  "versionCode": 2007,
-  "versionName": "2.2.47",
+  "versionCode": 2008,
+  "versionName": "2.2.49",
   "apkUrl": "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk",
-  "changelog": "Diseño móvil y tablet para TV en vivo estilo Tele Latino (reproductor superior, categorías, favoritos y búsqueda) sin alterar TV Box.",
+  "changelog": "Cambio de canal (zapping) instantáneo en todos los dispositivos con conexión directa nativa, cero buffering y optimización de decodificación acelerada.",
   "mandatory": false
 }

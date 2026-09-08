@@ -9,14 +9,15 @@ import android.view.SurfaceHolder
 import tv.danmaku.ijk.media.player.IMediaPlayer
 import tv.danmaku.ijk.media.player.IjkMediaPlayer
 import tv.danmaku.ijk.media.player.misc.ITrackInfo
+import java.util.concurrent.Executors
 
 /**
  * Motor multimedia IjkPlayer (el mismo motor utilizado por Tele Latino).
  *
- * Caracter뿯½sticas principales:
- * - Aceleraci뿯½n por hardware mediante MediaCodec (sin recalentamiento del procesador).
- * - Desmultiplexi뿯½n nativa con FFmpeg (compatible con flujos IPTV en vivo MPEG-TS y HLS).
- * - Zapping ultra r뿯½pido con buffer m뿯½nimo para transmisiones en vivo.
+ * Características principales:
+ * - Aceleración por hardware mediante MediaCodec (sin recalentamiento del procesador).
+ * - Desmultiplexión nativa con FFmpeg (compatible con flujos IPTV en vivo MPEG-TS y HLS).
+ * - Zapping instantáneo con latencia cero y sin buffering de paquetes.
  * - Manejo robusto de aspecto (Pantalla completa, Zoom, 16:9, 4:3, Original).
  */
 class IjkEngine(private val context: Context) {
@@ -32,7 +33,6 @@ class IjkEngine(private val context: Context) {
     var onEnded: (() -> Unit)? = null
 
     private var pending: Runnable? = null
-    private var openRunnable: Runnable? = null
     private var seekFlush: Runnable? = null
     private var pendingSeekMs: Long? = null
 
@@ -41,6 +41,8 @@ class IjkEngine(private val context: Context) {
     private var lastUrl: String? = null
     private var lastOpenAt = 0L
     private var endedFiredForUrl: String? = null
+
+    private val releaseExecutor = Executors.newSingleThreadExecutor()
 
     enum class AspectMode { FILL, ZOOM, RATIO_16_9, RATIO_4_3, ORIGINAL }
     private var aspectMode = AspectMode.FILL
@@ -66,7 +68,7 @@ class IjkEngine(private val context: Context) {
         try {
             player?.setDisplay(holder)
         } catch (e: Throwable) {
-            Log.w(TAG, "setDisplay fall뿯½", e)
+            Log.w(TAG, "setDisplay falló", e)
         }
     }
 
@@ -81,11 +83,11 @@ class IjkEngine(private val context: Context) {
         } catch (_: Throwable) {}
     }
 
-    fun playNow(url: String) = schedule(url, 0L, vod = false)
+    fun playNow(url: String) = schedule(url, vod = false)
 
-    fun playVod(url: String) = schedule(url, 0L, vod = true)
+    fun playVod(url: String) = schedule(url, vod = true)
 
-    fun playZap(url: String) = schedule(url, ZAP_DEBOUNCE_MS, vod = false)
+    fun playZap(url: String) = schedule(url, vod = false)
 
     fun togglePause() {
         if (released) return
@@ -158,7 +160,7 @@ class IjkEngine(private val context: Context) {
         try {
             player?.seekTo(positionMs)
         } catch (e: Throwable) {
-            Log.w(TAG, "seek fall뿯½", e)
+            Log.w(TAG, "seek falló", e)
         }
     }
 
@@ -208,7 +210,7 @@ class IjkEngine(private val context: Context) {
         return try {
             val tracks = player?.trackInfo ?: return emptyList()
             buildList {
-                add(Track(-1, "Sin subt뿯½tulos"))
+                add(Track(-1, "Sin subtítulos"))
                 tracks.forEachIndexed { index, t ->
                     if (t.trackType == ITrackInfo.MEDIA_TRACK_TYPE_TIMEDTEXT ||
                         t.trackType == ITrackInfo.MEDIA_TRACK_TYPE_SUBTITLE
@@ -248,7 +250,7 @@ class IjkEngine(private val context: Context) {
 
     fun cycleSubtitleTrack(): String? {
         val tracks = subtitleTracks()
-        if (tracks.isEmpty()) return "Sin subt뿯½tulos"
+        if (tracks.isEmpty()) return "Sin subtítulos"
         val cur = currentSubtitleTrackId()
         val idx = tracks.indexOfFirst { it.id == cur }.let { if (it < 0) 0 else (it + 1) % tracks.size }
         setSubtitleTrack(tracks[idx].id)
@@ -273,36 +275,31 @@ class IjkEngine(private val context: Context) {
         }
     }
 
-    private fun schedule(url: String, debounceMs: Long, vod: Boolean) {
+    private fun schedule(url: String, vod: Boolean) {
         if (released || url.isBlank()) return
         if (url == lastUrl && isPlayingSafe()) return
         lastUrl = url
         endedFiredForUrl = null
         val myGen = ++gen
         pending?.let { main.removeCallbacks(it) }
-        openRunnable?.let { main.removeCallbacks(it) }
 
-        val r = Runnable {
-            if (released || myGen != gen) return@Runnable
-            prepareSwitch(url, myGen, vod)
+        // Si ya estamos en el hilo principal, ejecutamos inmediatamente sin encolar
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            openMedia(url, vod)
+        } else {
+            val r = Runnable {
+                if (released || myGen != gen) return@Runnable
+                openMedia(url, vod)
+            }
+            pending = r
+            main.post(r)
         }
-        pending = r
-        if (debounceMs > 0L) main.postDelayed(r, debounceMs) else main.post(r)
     }
 
     private fun isPlayingSafe(): Boolean = try {
         !released && (player?.isPlaying == true)
     } catch (_: Throwable) {
         false
-    }
-
-    private fun prepareSwitch(url: String, myGen: Int, vod: Boolean) {
-        val open = Runnable {
-            if (released || myGen != gen) return@Runnable
-            openMedia(url, vod)
-        }
-        openRunnable = open
-        main.post(open)
     }
 
     private fun openMedia(url: String, vod: Boolean) {
@@ -314,44 +311,61 @@ class IjkEngine(private val context: Context) {
         val p = createConfiguredPlayer(vod)
         player = p
 
-        // Liberar reproductor anterior en hilo secundario para evitar pausas en el hilo de UI
+        // Desvincular de inmediato del surface y liberar el reproductor anterior en hilo secundario
         if (oldPlayer != null) {
-            Thread {
+            try { oldPlayer.setDisplay(null) } catch (_: Throwable) {}
+            releaseExecutor.execute {
                 try {
                     oldPlayer.stop()
-                    oldPlayer.setDisplay(null)
                     oldPlayer.release()
                 } catch (_: Throwable) {}
-            }.start()
+            }
         }
 
         try {
             currentHolder?.let { p.setDisplay(it) }
-            val playUrl = StreamBridge.maybeWrap(url)
-            p.dataSource = playUrl
+            // Reproducción nativa directa de alta velocidad (sin proxy local)
+            p.dataSource = url
             p.prepareAsync()
         } catch (e: Throwable) {
-            Log.e(TAG, "Fallo al abrir media: $url", e)
-            onError?.invoke()
+            Log.w(TAG, "Fallo al abrir media directo: $url, probando con StreamBridge", e)
+            try {
+                val bridgeUrl = StreamBridge.maybeWrap(url)
+                p.dataSource = bridgeUrl
+                p.prepareAsync()
+            } catch (e2: Throwable) {
+                Log.e(TAG, "Fallo total al abrir media: $url", e2)
+                onError?.invoke()
+            }
         }
     }
 
     private fun createConfiguredPlayer(vod: Boolean): IjkMediaPlayer {
         val p = IjkMediaPlayer()
 
-        // Decodificaci뿯½n acelerada por hardware (MediaCodec - id뿯½ntico a Tele Latino)
+        // Decodificación acelerada por hardware MediaCodec (GPU de TV Box, teléfono y tablet)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", 1L)
 
-        // Optimizaci뿯½n de zapping y baja latencia
+        // Optimización de zapping instantáneo y ultra baja latencia
         if (!vod) {
+            // Cero buffering de paquetes para zapping instantáneo
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 0L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 1L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-fps", 60L)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 100000L) // 100ms
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 102400L)      // 100KB
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "min-frames", 2L)
+
+            // Detección ultrarrápida de cabecera TS (30ms / 32KB)
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 30000L) // 30ms
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 32768L)      // 32KB
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "fflags", "nobuffer")
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "flush_packets", 1L)
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max_delay", 0L)
+
+            // Codec: omitir bucle de filtrado no referencial para renderizar el primer cuadro de inmediato
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48L)
         } else {
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 1L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 500000L)
@@ -360,11 +374,18 @@ class IjkEngine(private val context: Context) {
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "dns_cache_clear", 1L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "fast", 1L)
+
+        // Opciones de red / TLS / HTTP:
+        // Mantener caché de DNS para que cambiar de canal al mismo host sea instantáneo
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "dns_cache_timeout", 3600000000L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_streamed", 1L)
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_delay_max", 3L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_delay_max", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "tls_verify", 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "user_agent", "NexoPlayer/2.0")
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "timeout", 6000000L)
 
         p.setOnPreparedListener { mp ->
             main.post {
@@ -433,23 +454,22 @@ class IjkEngine(private val context: Context) {
         if (released) return
         released = true
         pending?.let { main.removeCallbacks(it) }
-        openRunnable?.let { main.removeCallbacks(it) }
         seekFlush?.let { main.removeCallbacks(it) }
         layout = null
         currentHolder = null
         val p = player
         player = null
-        Thread {
+        releaseExecutor.execute {
             try {
                 p?.stop()
                 p?.setDisplay(null)
                 p?.release()
             } catch (_: Throwable) {}
-        }.start()
+        }
+        releaseExecutor.shutdown()
     }
 
     companion object {
         private const val TAG = "IjkEngine"
-        private const val ZAP_DEBOUNCE_MS = 70L
     }
 }
