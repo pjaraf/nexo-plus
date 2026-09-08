@@ -19,11 +19,13 @@ data class LiveCategory(
 
 data class LiveChannel(
     @SerializedName("stream_id") val streamId: Any? = null,
+    @SerializedName("num") val num: Any? = null,
     val name: String = "",
     @SerializedName("stream_icon") val streamIcon: String? = null,
     @SerializedName("category_id") val categoryId: String? = null
 ) {
     val id: String get() = streamId?.toString()?.substringBefore(".0").orEmpty()
+    val channelNumber: String get() = num?.toString()?.substringBefore(".0").orEmpty()
 }
 
 data class VodItem(

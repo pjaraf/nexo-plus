@@ -74,6 +74,8 @@ import com.nexo.tv.data.XtreamClient
 import com.nexo.tv.player.IjkEngine
 import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
+import com.nexo.tv.ui.Device
+import com.nexo.tv.ui.MobileLiveScreen
 import com.nexo.tv.ui.PosterImage
 import kotlinx.coroutines.delay
 
@@ -267,133 +269,172 @@ class LiveActivity : ComponentActivity() {
                 runCatching { rootFocus.requestFocus() }
             }
 
-            val current = activeChannels.getOrNull(index)
-
-            BackHandler {
-                when {
-                    showCategories -> showCategories = false
-                    else -> {
-                        current?.let { persistWatching(it) }
-                        finish()
-                    }
-                }
+            var favorites by remember {
+                mutableStateOf(prefs.getStringSet(KEY_FAVORITES, emptySet())?.toSet() ?: emptySet())
             }
 
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .focusRequester(rootFocus)
-                    .focusable()
-                    .onKeyEvent { e ->
-                        if (showCategories) return@onKeyEvent false
-                        if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
-                        if (e.nativeKeyEvent.repeatCount > 0) return@onKeyEvent true
-                        when (e.nativeKeyEvent.keyCode) {
-                            AndroidKeyEvent.KEYCODE_DPAD_DOWN,
-                            AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
-                            AndroidKeyEvent.KEYCODE_PAGE_DOWN -> {
-                                zap(1); true
-                            }
-                            AndroidKeyEvent.KEYCODE_DPAD_UP,
-                            AndroidKeyEvent.KEYCODE_CHANNEL_UP,
-                            AndroidKeyEvent.KEYCODE_PAGE_UP -> {
-                                zap(-1); true
-                            }
-                            AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
-                            AndroidKeyEvent.KEYCODE_MENU,
-                            AndroidKeyEvent.KEYCODE_INFO -> {
-                                openCategories(); true
-                            }
-                            AndroidKeyEvent.KEYCODE_DPAD_CENTER,
-                            AndroidKeyEvent.KEYCODE_ENTER -> {
-                                if (current != null) revealBanner()
-                                true
-                            }
-                            else -> false
-                        }
-                    }
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        IjkVideoLayout(ctx).apply {
-                            layoutParams = FrameLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT
-                            )
-                            keepScreenOn = true
-                            isFocusable = false
-                            isFocusableInTouchMode = false
-                            engine.attach(this)
-                        }
+            fun toggleFavorite(chId: String) {
+                val updated = if (chId in favorites) favorites - chId else favorites + chId
+                favorites = updated
+                prefs.edit().putStringSet(KEY_FAVORITES, updated).apply()
+            }
+
+            val current = activeChannels.getOrNull(index)
+            val isTv = remember { Device.isTv(this@LiveActivity) }
+
+            if (!isTv) {
+                MobileLiveScreen(
+                    engine = engine,
+                    allChannels = allChannels,
+                    categories = categories,
+                    selectedCategoryId = selectedCategoryId,
+                    onSelectCategory = { selectCategory(it) },
+                    currentChannel = current,
+                    onSelectChannel = { ch ->
+                        val idx = activeChannels.indexOfFirst { it.id == ch.id }
+                        if (idx >= 0) index = idx
+                        playChannel(ch, instant = true)
                     },
-                    update = { engine.attach(it) },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Banner canal (Popup sin foco: no bloquea el zapping)
-                if (showBanner && current != null && !showCategories) {
-                    Popup(
-                        alignment = Alignment.CenterStart,
-                        properties = PopupProperties(
-                            focusable = false,
-                            dismissOnBackPress = false,
-                            dismissOnClickOutside = false
-                        )
-                    ) {
-                        ChannelSideBanner(
-                            number = index + 1,
-                            channel = current,
-                            categoryName = selectedCategoryName
-                        )
+                    onZap = { delta -> zap(delta) },
+                    status = status,
+                    loading = loading,
+                    favorites = favorites,
+                    onToggleFavorite = { toggleFavorite(it) },
+                    onHomeClick = {
+                        current?.let { persistWatching(it) }
+                        finish()
+                    },
+                    onLogout = {
+                        exitNexoCompletely()
                     }
-                }
-
-                if (showCategories) {
-                    Dialog(
-                        onDismissRequest = { showCategories = false },
-                        properties = DialogProperties(
-                            dismissOnBackPress = true,
-                            dismissOnClickOutside = false,
-                            usePlatformDefaultWidth = false,
-                            decorFitsSystemWindows = false
-                        )
-                    ) {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .background(Color.Transparent)
-                                .onPreviewKeyEvent { e ->
-                                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    when (e.nativeKeyEvent.keyCode) {
-                                        AndroidKeyEvent.KEYCODE_DPAD_LEFT,
-                                        AndroidKeyEvent.KEYCODE_BACK -> {
-                                            showCategories = false
-                                            true
-                                        }
-                                        else -> false
-                                    }
-                                }
-                        ) {
-                            CategorySidePanel(
-                                categories = categories,
-                                selectedCategoryId = selectedCategoryId,
-                                listState = listState,
-                                firstFocus = categoryFocus,
-                                onSelect = { selectCategory(it) },
-                                modifier = Modifier.align(Alignment.CenterEnd)
-                            )
+                )
+            } else {
+                BackHandler {
+                    when {
+                        showCategories -> showCategories = false
+                        else -> {
+                            current?.let { persistWatching(it) }
+                            finish()
                         }
                     }
                 }
 
-                if (allChannels.isEmpty() && !loading) {
-                    Text(
-                        text = status,
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        modifier = Modifier.align(Alignment.Center)
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(Color.Black)
+                        .focusRequester(rootFocus)
+                        .focusable()
+                        .onKeyEvent { e ->
+                            if (showCategories) return@onKeyEvent false
+                            if (e.type != KeyEventType.KeyDown) return@onKeyEvent false
+                            if (e.nativeKeyEvent.repeatCount > 0) return@onKeyEvent true
+                            when (e.nativeKeyEvent.keyCode) {
+                                AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+                                AndroidKeyEvent.KEYCODE_CHANNEL_DOWN,
+                                AndroidKeyEvent.KEYCODE_PAGE_DOWN -> {
+                                    zap(1); true
+                                }
+                                AndroidKeyEvent.KEYCODE_DPAD_UP,
+                                AndroidKeyEvent.KEYCODE_CHANNEL_UP,
+                                AndroidKeyEvent.KEYCODE_PAGE_UP -> {
+                                    zap(-1); true
+                                }
+                                AndroidKeyEvent.KEYCODE_DPAD_RIGHT,
+                                AndroidKeyEvent.KEYCODE_MENU,
+                                AndroidKeyEvent.KEYCODE_INFO -> {
+                                    openCategories(); true
+                                }
+                                AndroidKeyEvent.KEYCODE_DPAD_CENTER,
+                                AndroidKeyEvent.KEYCODE_ENTER -> {
+                                    if (current != null) revealBanner()
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            IjkVideoLayout(ctx).apply {
+                                layoutParams = FrameLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
+                                keepScreenOn = true
+                                isFocusable = false
+                                isFocusableInTouchMode = false
+                                engine.attach(this)
+                            }
+                        },
+                        update = { engine.attach(it) },
+                        modifier = Modifier.fillMaxSize()
                     )
+
+                    // Banner canal (Popup sin foco: no bloquea el zapping)
+                    if (showBanner && current != null && !showCategories) {
+                        Popup(
+                            alignment = Alignment.CenterStart,
+                            properties = PopupProperties(
+                                focusable = false,
+                                dismissOnBackPress = false,
+                                dismissOnClickOutside = false
+                            )
+                        ) {
+                            ChannelSideBanner(
+                                number = index + 1,
+                                channel = current,
+                                categoryName = selectedCategoryName
+                            )
+                        }
+                    }
+
+                    if (showCategories) {
+                        Dialog(
+                            onDismissRequest = { showCategories = false },
+                            properties = DialogProperties(
+                                dismissOnBackPress = true,
+                                dismissOnClickOutside = false,
+                                usePlatformDefaultWidth = false,
+                                decorFitsSystemWindows = false
+                            )
+                        ) {
+                            Box(
+                                Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Transparent)
+                                    .onPreviewKeyEvent { e ->
+                                        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                        when (e.nativeKeyEvent.keyCode) {
+                                            AndroidKeyEvent.KEYCODE_DPAD_LEFT,
+                                            AndroidKeyEvent.KEYCODE_BACK -> {
+                                                showCategories = false
+                                                true
+                                            }
+                                            else -> false
+                                        }
+                                    }
+                            ) {
+                                CategorySidePanel(
+                                    categories = categories,
+                                    selectedCategoryId = selectedCategoryId,
+                                    listState = listState,
+                                    firstFocus = categoryFocus,
+                                    onSelect = { selectCategory(it) },
+                                    modifier = Modifier.align(Alignment.CenterEnd)
+                                )
+                            }
+                        }
+                    }
+
+                    if (allChannels.isEmpty() && !loading) {
+                        Text(
+                            text = status,
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            modifier = Modifier.align(Alignment.Center)
+                        )
+                    }
                 }
             }
         }
@@ -420,7 +461,7 @@ class LiveActivity : ComponentActivity() {
     }
 
     override fun onUserLeaveHint() {
-        // Home: cerrar app completa (guardando canal antes).
+        // Home: guardar canal
         lastPlayed?.let { ch ->
             getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putString(KEY_CHANNEL, ch.id)
@@ -428,7 +469,9 @@ class LiveActivity : ComponentActivity() {
                 .apply()
         }
         super.onUserLeaveHint()
-        exitNexoCompletely()
+        if (Device.isTv(this)) {
+            exitNexoCompletely()
+        }
     }
 
     companion object {
@@ -438,6 +481,7 @@ class LiveActivity : ComponentActivity() {
         private const val PREFS = "nexo_live"
         private const val KEY_CATEGORY = "category_id"
         private const val KEY_CHANNEL = "channel_id"
+        private const val KEY_FAVORITES = "favorites"
     }
 }
 
