@@ -2,6 +2,7 @@ package com.nexo.tv.player
 
 import android.util.Log
 import com.nexo.tv.data.Http
+import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import java.io.BufferedReader
@@ -15,9 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * VLC en esta TV Box crashea (SIGSEGV/nettle) con HTTPS.
- * Este puente baja el stream con OkHttp (TLS de Java) y se lo da a VLC por HTTP local.
- * Soporta Range/206 para que el seek de VOD no se congele.
+ * Puente ultra rápido local para flujos HTTPS.
+ * OkHttp maneja TLS 1.3 certificado y entrega el flujo a IjkPlayer por 127.0.0.1 con tcpNoDelay.
  */
 object StreamBridge {
     private const val TAG = "StreamBridge"
@@ -27,6 +27,7 @@ object StreamBridge {
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var port: Int = 0
     private var server: ServerSocket? = null
+    @Volatile private var activeCall: Call? = null
 
     @Synchronized
     fun start() {
@@ -39,6 +40,9 @@ object StreamBridge {
             while (running.get()) {
                 try {
                     val sock = ss.accept()
+                    sock.tcpNoDelay = true
+                    sock.sendBufferSize = 64 * 1024
+                    sock.receiveBufferSize = 64 * 1024
                     pool.execute { handle(sock) }
                 } catch (_: Throwable) {
                     if (!running.get()) break
@@ -55,34 +59,20 @@ object StreamBridge {
         return "http://127.0.0.1:$port/$id"
     }
 
-    /** Solo HTTPS necesita el puente; HTTP se reproduce directo (seek OK). */
+    /** Solo HTTPS necesita el puente; HTTP se reproduce directo. */
     fun maybeWrap(remoteUrl: String): String {
         return if (remoteUrl.startsWith("https://", true)) wrap(remoteUrl) else remoteUrl
     }
 
-    /**
-     * Precalienta TCP/DNS del vecino (HEAD/Range corto) para que el siguiente zap
-     * arranque más rápido. No bloquea el hilo UI.
-     */
-    fun warm(remoteUrl: String) {
-        if (remoteUrl.isBlank()) return
-        val url = maybeWrap(remoteUrl)
-        pool.execute {
-            try {
-                val req = Request.Builder()
-                    .url(url)
-                    .header("Range", "bytes=0-1")
-                    .get()
-                    .build()
-                Http.client.newCall(req).execute().use { /* discard */ }
-            } catch (_: Throwable) {
-                // ignore: solo calentamiento
-            }
-        }
+    /** Cancela de inmediato cualquier descarga activa del canal anterior */
+    fun cancelActive() {
+        try { activeCall?.cancel() } catch (_: Throwable) {}
+        activeCall = null
     }
 
     private fun handle(socket: Socket) {
         socket.soTimeout = 60_000
+        socket.tcpNoDelay = true
         try {
             val input = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.ISO_8859_1))
             val requestLine = input.readLine() ?: return
@@ -110,13 +100,18 @@ object StreamBridge {
 
             val reqBuilder = Request.Builder()
                 .url(remote)
-                .header("User-Agent", "NexoPlayer/2.0")
+                .header("User-Agent", "IPTVSmartersPro")
                 .header("Accept", "*/*")
             if (!rangeHeader.isNullOrBlank()) {
                 reqBuilder.header("Range", rangeHeader)
             }
 
-            Http.client.newCall(reqBuilder.build()).execute().use { resp ->
+            val call = Http.client.newCall(reqBuilder.build())
+            // Cancelar canal previo para liberar ancho de banda al 100%
+            activeCall?.cancel()
+            activeCall = call
+
+            call.execute().use { resp ->
                 if (!resp.isSuccessful && resp.code != 206) {
                     writeStatus(out, resp.code, "Error", emptyMap(), 0)
                     return
@@ -146,10 +141,11 @@ object StreamBridge {
                         bytes.size
                     )
                     out.write(bytes)
+                    out.flush()
                 } else {
                     val len = body.contentLength()
                     val headers = linkedMapOf<String, String>()
-                    headers["Content-Type"] = ctype.ifBlank { "application/octet-stream" }
+                    headers["Content-Type"] = ctype.ifBlank { "video/mp2t" }
                     headers["Accept-Ranges"] = "bytes"
                     resp.header("Content-Range")?.let { headers["Content-Range"] = it }
                     resp.header("Content-Length")?.let { headers["Content-Length"] = it }
@@ -164,12 +160,20 @@ object StreamBridge {
                         headers["Content-Length"] = declaredLen.toString()
                     }
                     writeStatus(out, status, reason, headers, if (headers.containsKey("Content-Length")) -2 else declaredLen)
-                    body.byteStream().copyTo(out)
+                    
+                    // Streaming directo a IjkPlayer con buffer optimizado de 32KB
+                    val inStream = body.byteStream()
+                    val buf = ByteArray(32 * 1024)
+                    var n: Int
+                    while (inStream.read(buf).also { n = it } != -1) {
+                        out.write(buf, 0, n)
+                        out.flush()
+                    }
                 }
                 out.flush()
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "proxy error: ${e.message}", e)
+            // Cancelado intencionalmente al cambiar de canal o cerrado
         } finally {
             try { socket.close() } catch (_: Throwable) {}
         }
@@ -177,47 +181,37 @@ object StreamBridge {
 
     private fun rewritePlaylist(body: String, playlistUrl: String): String {
         val base = playlistUrl.toHttpUrlOrNull()
-        return body.lineSequence().joinToString("\n") { raw ->
-            val line = raw.trim()
-            when {
-                line.isEmpty() -> raw
-                line.startsWith("#") -> raw.replace(Regex("""URI="([^"]+)"""")) { m ->
-                    val abs = resolve(base, m.groupValues[1])
-                    """URI="${wrap(abs)}""""
+        val out = StringBuilder()
+        body.lineSequence().forEach { line ->
+            val trim = line.trim()
+            if (trim.isEmpty() || trim.startsWith("#")) {
+                out.append(line).append("\n")
+            } else {
+                val resolved = when {
+                    trim.startsWith("http://", true) || trim.startsWith("https://", true) -> trim
+                    base != null -> base.resolve(trim)?.toString() ?: trim
+                    else -> trim
                 }
-                else -> wrap(resolve(base, line))
+                out.append(maybeWrap(resolved)).append("\n")
             }
         }
+        return out.toString()
     }
 
-    private fun resolve(base: okhttp3.HttpUrl?, ref: String): String {
-        if (ref.startsWith("http://", true) || ref.startsWith("https://", true)) return ref
-        return base?.resolve(ref)?.toString() ?: ref
-    }
-
-    /**
-     * @param length -2 = Content-Length already in headers; >=0 write Content-Length; -1 omit (chunked-like close)
-     */
     private fun writeStatus(
         out: java.io.OutputStream,
-        code: Int,
+        status: Int,
         reason: String,
         headers: Map<String, String>,
-        length: Int
+        contentLength: Int
     ) {
         val sb = StringBuilder()
-        sb.append("HTTP/1.1 $code $reason\r\n")
-        headers.forEach { (k, v) ->
-            if (!k.equals("Content-Length", true) || length == -2) {
-                sb.append("$k: $v\r\n")
-            }
+        sb.append("HTTP/1.1 ").append(status).append(" ").append(reason).append("\r\n")
+        headers.forEach { (k, v) -> sb.append(k).append(": ").append(v).append("\r\n") }
+        if (contentLength >= 0 && !headers.containsKey("Content-Length")) {
+            sb.append("Content-Length: ").append(contentLength).append("\r\n")
         }
-        if (length >= 0 && !headers.keys.any { it.equals("Content-Length", true) }) {
-            sb.append("Content-Length: $length\r\n")
-        }
-        sb.append("Connection: close\r\n")
-        sb.append("Access-Control-Allow-Origin: *\r\n")
-        sb.append("\r\n")
+        sb.append("Connection: close\r\n\r\n")
         out.write(sb.toString().toByteArray(Charsets.ISO_8859_1))
     }
 }

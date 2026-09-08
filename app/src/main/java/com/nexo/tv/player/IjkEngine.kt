@@ -237,7 +237,7 @@ class IjkEngine(private val context: Context) {
     }
 
     fun setSubtitleTrack(id: Int) {
-        if (released) return
+        if (released || id < 0) return
         try {
             if (id < 0) {
                 val cur = currentSubtitleTrackId()
@@ -307,6 +307,9 @@ class IjkEngine(private val context: Context) {
         lastOpenAt = SystemClock.uptimeMillis()
         onBuffering?.invoke(true)
 
+        // Cancelar inmediatamente la descarga del stream previo para liberar 100% el ancho de banda
+        StreamBridge.cancelActive()
+
         val oldPlayer = player
         val p = createConfiguredPlayer(vod)
         player = p
@@ -324,19 +327,12 @@ class IjkEngine(private val context: Context) {
 
         try {
             currentHolder?.let { p.setDisplay(it) }
-            // Reproducción nativa directa de alta velocidad (sin proxy local)
-            p.dataSource = url
+            val playUrl = StreamBridge.maybeWrap(url)
+            p.dataSource = playUrl
             p.prepareAsync()
         } catch (e: Throwable) {
-            Log.w(TAG, "Fallo al abrir media directo: $url, probando con StreamBridge", e)
-            try {
-                val bridgeUrl = StreamBridge.maybeWrap(url)
-                p.dataSource = bridgeUrl
-                p.prepareAsync()
-            } catch (e2: Throwable) {
-                Log.e(TAG, "Fallo total al abrir media: $url", e2)
-                onError?.invoke()
-            }
+            Log.e(TAG, "Fallo al abrir media: $url", e)
+            onError?.invoke()
         }
     }
 
@@ -376,15 +372,10 @@ class IjkEngine(private val context: Context) {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "fast", 1L)
 
-        // Opciones de red / TLS / HTTP:
-        // Mantener caché de DNS para que cambiar de canal al mismo host sea instantáneo
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "dns_cache_timeout", 3600000000L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_streamed", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_delay_max", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "tls_verify", 0L)
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "user_agent", "NexoPlayer/2.0")
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "timeout", 6000000L)
 
         p.setOnPreparedListener { mp ->
