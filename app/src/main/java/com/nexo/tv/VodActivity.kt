@@ -72,6 +72,7 @@ import com.nexo.tv.player.IjkEngine
 import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
 import com.nexo.tv.ui.PosterImage
+import com.nexo.tv.ui.ResumePrompt
 import kotlinx.coroutines.delay
 
 class VodActivity : ComponentActivity() {
