@@ -1,6 +1,6 @@
 {
-  "versionCode": 19,
-  "versionName": "2.2.0",
+  "versionCode": 1044,
+  "versionName": "2.2.4",
   "apkUrl": "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk",
   "changelog": "Reemplazo de VLC por IjkPlayer con aceleración MediaCodec y zapping ultra rápido (mismo motor de Tele Latino)",
   "mandatory": false

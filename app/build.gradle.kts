@@ -12,8 +12,8 @@ android {
         applicationId = "com.nexo.tv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 19
-        versionName = "2.2.0"
+        versionCode = 1044
+        versionName = "2.2.4"
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
         }
