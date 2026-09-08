@@ -26,6 +26,7 @@ object StreamBridge {
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var port: Int = 0
     private var server: ServerSocket? = null
+    @Volatile private var lastRemoteUrl: String? = null
 
     @Synchronized
     fun start() {
@@ -54,6 +55,7 @@ object StreamBridge {
         start()
         val id = seq.incrementAndGet().toString()
         targets[id] = remoteUrl
+        lastRemoteUrl = remoteUrl
         return "http://127.0.0.1:$port/$id"
     }
 
@@ -70,9 +72,15 @@ object StreamBridge {
             val requestLine = input.readLine() ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
-            val path = parts[1].substringBefore("?").trimStart('/')
-            val id = path.substringBefore("/")
-            val remote = targets[id]
+            val rawPath = parts[1].trimStart('/')
+            val id = rawPath.substringBefore("?").substringBefore("/")
+            
+            // Buscar URL remota por ID o resolver como ruta relativa contra lastRemoteUrl
+            val remote = targets[id] ?: lastRemoteUrl?.let { base ->
+                val baseHttp = base.toHttpUrlOrNull()
+                baseHttp?.resolve(rawPath)?.toString()
+            }
+
             val out = socket.getOutputStream()
             if (remote.isNullOrBlank()) {
                 writeStatus(out, 404, "Not Found", emptyMap(), 0)
@@ -160,21 +168,22 @@ object StreamBridge {
 
     private fun rewritePlaylist(body: String, playlistUrl: String): String {
         val base = playlistUrl.toHttpUrlOrNull()
-        val out = StringBuilder()
-        body.lineSequence().forEach { line ->
-            val trim = line.trim()
-            if (trim.isEmpty() || trim.startsWith("#")) {
-                out.append(line).append("\n")
-            } else {
-                val resolved = when {
-                    trim.startsWith("http://", true) || trim.startsWith("https://", true) -> trim
-                    base != null -> base.resolve(trim)?.toString() ?: trim
-                    else -> trim
+        return body.lineSequence().joinToString("\n") { raw ->
+            val line = raw.trim()
+            when {
+                line.isEmpty() -> raw
+                line.startsWith("#") -> raw.replace(Regex("""URI="([^"]+)"""")) { m ->
+                    val abs = resolve(base, m.groupValues[1])
+                    """URI="${wrap(abs)}""""
                 }
-                out.append(maybeWrap(resolved)).append("\n")
+                else -> wrap(resolve(base, line))
             }
         }
-        return out.toString()
+    }
+
+    private fun resolve(base: okhttp3.HttpUrl?, ref: String): String {
+        if (ref.startsWith("http://", true) || ref.startsWith("https://", true)) return ref
+        return base?.resolve(ref)?.toString() ?: ref
     }
 
     private fun writeStatus(
