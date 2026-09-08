@@ -1,7 +1,9 @@
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod,SourceFile,LineNumberTable
 -keep class com.nexo.tv.data.** { *; }
--keep class org.videolan.libvlc.** { *; }
--dontwarn org.videolan.libvlc.**
+-keep class tv.danmaku.ijk.media.player.** { *; }
+-dontwarn tv.danmaku.ijk.media.player.**
+-keep class xyz.doikki.videoplayer.** { *; }
+-dontwarn xyz.doikki.videoplayer.**
 -keep class com.google.gson.** { *; }
 -dontwarn okhttp3.**
 -dontwarn okio.**

@@ -12,8 +12,8 @@ android {
         applicationId = "com.nexo.tv"
         minSdk = 24
         targetSdk = 35
-        versionCode = 18
-        versionName = "2.1.3"
+        versionCode = 19
+        versionName = "2.2.0"
         ndk {
             abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
         }
@@ -68,6 +68,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.okhttp)
     implementation(libs.gson)
-    implementation(libs.libvlc.all)
+    implementation(libs.player.ijk)
     implementation(libs.androidx.security.crypto)
 }

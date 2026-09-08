@@ -71,11 +71,11 @@ import androidx.compose.ui.window.PopupProperties
 import com.nexo.tv.data.LiveCategory
 import com.nexo.tv.data.LiveChannel
 import com.nexo.tv.data.XtreamClient
+import com.nexo.tv.player.IjkEngine
+import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
-import com.nexo.tv.player.VlcEngine
 import com.nexo.tv.ui.PosterImage
 import kotlinx.coroutines.delay
-import org.videolan.libvlc.util.VLCVideoLayout
 
 class LiveActivity : ComponentActivity() {
     /** Último canal reproducido (para guardar al ir a Home / cerrar). */
@@ -89,7 +89,7 @@ class LiveActivity : ComponentActivity() {
         intent.getStringExtra(EXTRA_PASS)?.let { Session.password = it }
         intent.getStringExtra(EXTRA_SERVER)?.let { if (it.isNotBlank()) Session.server = it }
         StreamBridge.start()
-        val engine = VlcEngine(this)
+        val engine = IjkEngine(this)
         val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
         fun persistWatching(ch: LiveChannel) {
@@ -316,7 +316,7 @@ class LiveActivity : ComponentActivity() {
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        VLCVideoLayout(ctx).apply {
+                        IjkVideoLayout(ctx).apply {
                             layoutParams = FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT

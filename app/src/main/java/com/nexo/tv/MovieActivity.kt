@@ -87,11 +87,11 @@ import com.nexo.tv.data.ContinueWatching
 import com.nexo.tv.data.SeriesDetailInfo
 import com.nexo.tv.data.VodItem
 import com.nexo.tv.data.XtreamClient
+import com.nexo.tv.player.IjkEngine
+import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
-import com.nexo.tv.player.VlcEngine
 import com.nexo.tv.ui.ResumePrompt
 import kotlinx.coroutines.delay
-import org.videolan.libvlc.util.VLCVideoLayout
 import kotlin.math.roundToInt
 
 /**
@@ -115,7 +115,7 @@ class MovieActivity : ComponentActivity() {
         val resumeFromIntent = intent.getLongExtra(EXTRA_RESUME_MS, -1L)
 
         StreamBridge.start()
-        val engine = VlcEngine(this)
+        val engine = IjkEngine(this)
 
         setContent {
             var loading by remember { mutableStateOf(true) }
@@ -412,7 +412,7 @@ class MovieActivity : ComponentActivity() {
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        VLCVideoLayout(ctx).also { layout ->
+                        IjkVideoLayout(ctx).also { layout ->
                             layout.layoutParams = FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT

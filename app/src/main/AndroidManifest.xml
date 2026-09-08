@@ -46,11 +46,11 @@
             </intent-filter>
         </activity>
 
-        <!-- VLC vive SOLO aquí. Un SIGSEGV mata :vlc, no el menú. -->
+        <!-- Reproductor IjkPlayer aislado en su propio proceso para máxima estabilidad -->
         <activity
             android:name=".LiveActivity"
             android:exported="false"
-            android:process=":vlc"
+            android:process=":player"
             android:launchMode="singleTask"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:theme="@style/Theme.Nexo" />
@@ -58,7 +58,7 @@
         <activity
             android:name=".VodActivity"
             android:exported="false"
-            android:process=":vlc"
+            android:process=":player"
             android:launchMode="singleTask"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:theme="@style/Theme.Nexo" />
@@ -66,7 +66,7 @@
         <activity
             android:name=".SeriesActivity"
             android:exported="false"
-            android:process=":vlc"
+            android:process=":player"
             android:launchMode="standard"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:theme="@style/Theme.Nexo" />
@@ -74,7 +74,7 @@
         <activity
             android:name=".MovieActivity"
             android:exported="false"
-            android:process=":vlc"
+            android:process=":player"
             android:launchMode="standard"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode"
             android:theme="@style/Theme.Nexo" />

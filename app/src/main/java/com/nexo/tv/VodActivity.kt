@@ -68,12 +68,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.nexo.tv.data.ContinueWatching
+import com.nexo.tv.player.IjkEngine
+import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
-import com.nexo.tv.player.VlcEngine
 import com.nexo.tv.ui.PosterImage
-import com.nexo.tv.ui.ResumePrompt
 import kotlinx.coroutines.delay
-import org.videolan.libvlc.util.VLCVideoLayout
 
 class VodActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -86,7 +85,7 @@ class VodActivity : ComponentActivity() {
         val movieId = intent.getStringExtra(EXTRA_ID).orEmpty()
         val resumeFromIntent = intent.getLongExtra(EXTRA_RESUME_MS, -1L)
         StreamBridge.start()
-        val engine = VlcEngine(this)
+        val engine = IjkEngine(this)
 
         setContent {
             var showHud by remember { mutableStateOf(true) }
@@ -267,7 +266,7 @@ class VodActivity : ComponentActivity() {
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        VLCVideoLayout(ctx).apply {
+                        IjkVideoLayout(ctx).apply {
                             layoutParams = FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT

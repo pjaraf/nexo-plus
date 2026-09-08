@@ -7,7 +7,7 @@ activityCompose = "1.10.0"
 composeBom = "2025.02.00"
 okhttp = "4.12.0"
 gson = "2.11.0"
-libvlc = "3.6.0-eap13"
+playerIjk = "3.3.7"
 securityCrypto = "1.1.0-alpha06"
 coilCompose = "2.7.0"
 
@@ -23,7 +23,7 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coilCompose" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
-libvlc-all = { group = "org.videolan.android", name = "libvlc-all", version.ref = "libvlc" }
+player-ijk = { group = "xyz.doikki.android.dkplayer", name = "player-ijk", version.ref = "playerIjk" }
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 [plugins]
