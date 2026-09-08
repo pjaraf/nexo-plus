@@ -94,11 +94,11 @@ fun LoginScreen(onSuccess: () -> Unit) {
         busy = true
         error = null
         scope.launch {
-            // Servidor oculto: usa el guardado / ElitePlus por defecto
+            // Servidor configurado: https://nexo.fusionx.cl
             val ok = XtreamClient.login(
                 user.trim(),
                 pass,
-                preferredServer = Session.server.ifBlank { Session.SERVER_ELITE }
+                preferredServer = Session.server.ifBlank { Session.SERVER }
             )
             busy = false
             if (ok) onSuccess() else error = "Usuario o clave incorrectos"

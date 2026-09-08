@@ -7,10 +7,8 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 object Session {
-    const val SERVER_NEXO = "https://nexo.fusionx.cl"
-    const val SERVER_ELITE = "http://eliteplusec.com:8080"
-    /** Servidor activo por defecto: ElitePlus (HTTP, estable en TV Box) */
-    const val SERVER = SERVER_ELITE
+    /** Servidor único y oficial de la app */
+    const val SERVER = "https://nexo.fusionx.cl"
 
     private lateinit var prefs: SharedPreferences
 
@@ -31,6 +29,11 @@ object Session {
             Log.e("Session", "encrypted prefs failed, using plain", e)
             ctx.getSharedPreferences("nexo_session_plain", Context.MODE_PRIVATE)
         }
+        // Eliminar cualquier URL previa guardada y asegurar el servidor oficial
+        val current = prefs.getString("server", null)
+        if (current != null && current != SERVER) {
+            prefs.edit().putString("server", SERVER).apply()
+        }
     }
 
     var username: String
@@ -44,14 +47,19 @@ object Session {
     var server: String
         get() {
             val stored = prefs.getString("server", SERVER) ?: SERVER
-            if (stored.contains("10.250.") || stored.contains("192.168.") || stored.contains("127.0.0.1")) {
+            if (stored.isBlank() || stored != SERVER) {
+                prefs.edit().putString("server", SERVER).apply()
                 return SERVER
             }
-            return stored.ifBlank { SERVER }
+            return stored
         }
         set(value) {
-            val clean = if (value.contains("10.250.") || value.contains("192.168.")) SERVER else value
-            prefs.edit().putString("server", clean.trimEnd('/')).apply()
+            val clean = if (value.isBlank() || value.contains("elite") || value.contains("10.250.") || value.contains("192.168.")) {
+                SERVER
+            } else {
+                value.trimEnd('/')
+            }
+            prefs.edit().putString("server", clean).apply()
         }
 
     val isLoggedIn: Boolean get() = username.isNotBlank() && password.isNotBlank()

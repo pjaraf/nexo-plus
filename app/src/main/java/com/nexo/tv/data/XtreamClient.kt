@@ -12,10 +12,7 @@ object XtreamClient {
         "Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 VLC/3.0.18"
 
     private val hosts = listOf(
-        Session.SERVER_ELITE,
-        "http://eliteplusec.com",
-        "http://eliteplusec.com:80",
-        Session.SERVER_NEXO
+        Session.SERVER
     )
 
     private val gson = Gson()

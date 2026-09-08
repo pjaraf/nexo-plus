@@ -1,7 +1,7 @@
 {
-  "versionCode": 1044,
-  "versionName": "2.2.4",
+  "versionCode": 2006,
+  "versionName": "2.2.46",
   "apkUrl": "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk",
-  "changelog": "Reemplazo de VLC por IjkPlayer con aceleración MediaCodec y zapping ultra rápido (mismo motor de Tele Latino)",
+  "changelog": "Servidor exclusivo configurado a https://nexo.fusionx.cl y eliminación de servidores anteriores.",
   "mandatory": false
 }
