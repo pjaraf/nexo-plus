@@ -89,6 +89,28 @@ fun HubScreen(onLogout: () -> Unit) {
     val movies = Catalog.movies
     val series = Catalog.series
     val movies2026 = remember(movies) { movies.filter { it.matchesYear(2026) } }
+    val firstShelf = remember(movies) { Catalog.movieShelves.firstOrNull() }
+    val firstCategoryMovies = remember(movies, firstShelf) {
+        if (firstShelf == null) emptyList()
+        else {
+            val catId = firstShelf.id
+            val inCat = movies.filter { it.categoryId == catId }
+            if (inCat.isNotEmpty()) inCat
+            else {
+                val ids = firstShelf.posters.map { it.id }.toSet()
+                movies.filter { it.id in ids }
+            }
+        }
+    }
+    val (homeCategoryTitle, homeMovies) = remember(movies2026, firstShelf, firstCategoryMovies, movies) {
+        if (movies2026.isNotEmpty()) {
+            "Películas 2026" to movies2026
+        } else if (firstCategoryMovies.isNotEmpty()) {
+            (firstShelf?.name?.ifBlank { "Películas" } ?: "Películas") to firstCategoryMovies
+        } else {
+            "Películas" to movies
+        }
+    }
     val liveFocus = remember { FocusRequester() }
 
     // Foco por defecto en TV en vivo (OK abre canales).
@@ -160,7 +182,8 @@ fun HubScreen(onLogout: () -> Unit) {
         Box(Modifier.fillMaxSize()) {
             when (tab) {
                 Tab.HOME -> HomePane(
-                    movies = movies2026,
+                    title = homeCategoryTitle,
+                    movies = homeMovies,
                     onMovie = { openMovie(it) }
                 )
                 Tab.SERIES -> Box(
@@ -277,6 +300,7 @@ private fun NavIcon(
 
 @Composable
 private fun HomePane(
+    title: String,
     movies: List<VodItem>,
     onMovie: (VodItem) -> Unit
 ) {
@@ -335,11 +359,11 @@ private fun HomePane(
         }
 
         Spacer(Modifier.weight(1f))
-        Text("Películas 2026", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+        Text(title, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         if (movies.isEmpty()) {
             Text(
-                "No hay películas de 2026 en el catálogo",
+                "No hay películas disponibles en el catálogo",
                 color = Color.White.copy(alpha = 0.7f),
                 fontSize = 14.sp,
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
