@@ -43,7 +43,7 @@ jobs:
           {
             "versionCode": $CODE,
             "versionName": "$NAME",
-            "apkUrl": "https://github.com/pjaraf/nexo-clean/releases/download/$TAG/app-release.apk",
+            "apkUrl": "https://github.com/pjaraf/nexo-plus/releases/download/$TAG/app-release.apk",
             "changelog": "Actualización automática Nexo TV $NAME",
             "mandatory": false
           }
@@ -80,4 +80,4 @@ jobs:
               --notes "Build automático #$CODE — cada push a main publica esta APK para actualizar todos los dispositivos."
           fi
           # Mantener también version.json en main como apuntador estable
-          echo "Release published: https://github.com/pjaraf/nexo-clean/releases/tag/$TAG"
+          echo "Release published: https://github.com/pjaraf/nexo-plus/releases/tag/$TAG"

@@ -1,4 +1,4 @@
-# Nexo TV (`nexo-clean`)
+# Nexo TV (`nexo-plus`)
 
 App Android TV con VLC, sesión guardada y actualización automática.
 

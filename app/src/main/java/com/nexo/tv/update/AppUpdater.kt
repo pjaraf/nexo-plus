@@ -32,8 +32,8 @@ object AppUpdater {
 
     /** Lectura pública del último release (el repo debe ser público para OTA). */
     private val VERSION_URLS = listOf(
-        "https://github.com/pjaraf/nexo-clean/releases/latest/download/version.json",
-        "https://raw.githubusercontent.com/pjaraf/nexo-clean/main/version.json"
+        "https://github.com/pjaraf/nexo-plus/releases/latest/download/version.json",
+        "https://raw.githubusercontent.com/pjaraf/nexo-plus/main/version.json"
     )
 
     suspend fun check(): UpdateInfo? = withContext(Dispatchers.IO) {
@@ -69,7 +69,7 @@ object AppUpdater {
     suspend fun download(context: Context, info: UpdateInfo, onProgress: (Int) -> Unit): File? =
         withContext(Dispatchers.IO) {
             val url = info.apkUrl.ifBlank {
-                "https://github.com/pjaraf/nexo-clean/releases/latest/download/app-release.apk"
+                "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk"
             }
             try {
                 val req = Request.Builder().url(url).build()
