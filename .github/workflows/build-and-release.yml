@@ -33,8 +33,8 @@ jobs:
       - name: Compute version
         id: ver
         run: |
-          CODE=$((1000 + ${{ github.run_number }}))
-          NAME="2.2.${{ github.run_number }}"
+          CODE=$((2000 + ${{ github.run_number }}))
+          NAME="2.2.$((40 + ${{ github.run_number }}))"
           TAG="v$NAME"
           echo "version_code=$CODE" >> "$GITHUB_OUTPUT"
           echo "version_name=$NAME" >> "$GITHUB_OUTPUT"
