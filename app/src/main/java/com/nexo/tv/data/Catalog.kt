@@ -1,5 +1,7 @@
 package com.nexo.tv.data
 
+import android.content.Context
+import com.nexo.tv.ui.PosterPreloader
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -15,7 +17,7 @@ data class PosterRef(
     val cover: String?
 )
 
-/** Catálogo precargado al arrancar / tras login. */
+/** Catálogo precargado al arrancar / tras login (datos + carátulas). */
 object Catalog {
     @Volatile var movies: List<VodItem> = emptyList()
         private set
@@ -44,7 +46,11 @@ object Catalog {
             }
         )
 
-    suspend fun preload() = coroutineScope {
+    suspend fun preload(
+        context: Context,
+        onStatus: (String) -> Unit = {}
+    ) = coroutineScope {
+        onStatus("Cargando películas y series…")
         val moviesJob = async { runCatching { XtreamClient.movies() }.getOrDefault(emptyList()) }
         val seriesJob = async { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
         val movieCatsJob = async { runCatching { XtreamClient.vodCategories() }.getOrDefault(emptyList()) }
@@ -59,6 +65,13 @@ object Catalog {
             "ready movies=${movies.size} series=${series.size} " +
                 "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
         )
+
+        onStatus("Precargando carátulas…")
+        val priority = priorityCoverUrls()
+        val rest = browseCoverUrls().filterNot { it in priority.toSet() }
+        PosterPreloader.warmPriority(context, priority)
+        // El resto sigue en segundo plano al entrar al hub
+        PosterPreloader.warmBackground(context, rest)
     }
 
     fun clear() {
@@ -68,6 +81,43 @@ object Catalog {
         seriesCategories = emptyList()
         ready = false
     }
+
+    /** Home + primeras filas visibles de películas/series. */
+    private fun priorityCoverUrls(): List<String> {
+        val out = LinkedHashSet<String>()
+        val movies2026 = movies.filter { it.matchesYear(2026) }
+        val homeMovies = when {
+            movies2026.isNotEmpty() -> movies2026
+            else -> {
+                val firstId = movieShelves.firstOrNull()?.id
+                if (firstId != null) movies.filter { it.categoryId == firstId } else movies
+            }
+        }
+        homeMovies.take(48).mapNotNull { cleanUrl(it.streamIcon) }.forEach { out += it }
+
+        movieShelves.take(15).forEach { shelf ->
+            shelf.posters.take(10).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
+        }
+        seriesShelves.take(15).forEach { shelf ->
+            shelf.posters.take(10).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
+        }
+        return out.toList()
+    }
+
+    /** Carátulas de filas de categorías (lo que se ve al navegar). */
+    private fun browseCoverUrls(): List<String> {
+        val out = LinkedHashSet<String>()
+        movieShelves.forEach { shelf ->
+            shelf.posters.take(16).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
+        }
+        seriesShelves.forEach { shelf ->
+            shelf.posters.take(16).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
+        }
+        return out.toList()
+    }
+
+    private fun cleanUrl(url: String?): String? =
+        url?.trim()?.takeIf { it.isNotEmpty() }
 
     private fun <T> buildShelves(
         categories: List<LiveCategory>,

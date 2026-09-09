@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
                     return@LaunchedEffect
                 }
                 splashMsg = "Cargando películas y series…"
-                Catalog.preload()
+                Catalog.preload(this@MainActivity) { msg -> splashMsg = msg }
                 screen = AppScreen.Hub
             }
 
