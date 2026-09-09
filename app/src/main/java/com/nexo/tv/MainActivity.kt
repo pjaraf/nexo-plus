@@ -22,7 +22,6 @@ import com.nexo.tv.ui.LoginScreen
 import com.nexo.tv.ui.SplashScreen
 import com.nexo.tv.ui.UpdateGate
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private enum class AppScreen { Loading, Login, Hub }
@@ -65,11 +64,11 @@ class MainActivity : ComponentActivity() {
                     screen = AppScreen.Login
                     return@LaunchedEffect
                 }
-                // Abrir Hub al instante; catálogo y carátulas en segundo plano
-                screen = AppScreen.Hub
-                launch(Dispatchers.IO) {
+                // Logo solo mientras se precargan datos + carátulas visibles
+                withContext(Dispatchers.IO) {
                     runCatching { Catalog.preload(this@MainActivity) }
                 }
+                screen = AppScreen.Hub
             }
 
             BackHandler(enabled = screen == AppScreen.Hub || screen == AppScreen.Login) {

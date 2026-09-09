@@ -31,7 +31,7 @@ object PosterPreloader {
         val clean = normalize(urls)
         if (clean.isEmpty()) return
         Log.i(TAG, "warm priority ${clean.size}")
-        warm(context.applicationContext, clean, parallelism = 12)
+        warm(context.applicationContext, clean, parallelism = 16)
     }
 
     fun warmBackground(context: Context, urls: Collection<String>) {

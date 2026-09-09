@@ -55,8 +55,8 @@ object Catalog {
         )
 
     /**
-     * Carga el catálogo y precarga carátulas en segundo plano.
-     * No bloquea con mensajes: al terminar los datos hace [bump] para refrescar el Hub.
+     * Carga catálogo y precarga carátulas del inicio antes de abrir el Hub
+     * (splash solo con logo, sin textos). El resto de portadas sigue en segundo plano.
      */
     suspend fun preload(context: Context) = coroutineScope {
         val moviesJob = async { runCatching { XtreamClient.movies() }.getOrDefault(emptyList()) }
@@ -75,10 +75,13 @@ object Catalog {
                 "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
         )
 
-        // Carátulas en segundo plano: no retienen la apertura del Hub
-        val priority = priorityCoverUrls()
-        val rest = browseCoverUrls().filterNot { it in priority.toSet() }
-        PosterPreloader.warmBackground(context, priority + rest)
+        // Esperar carátulas visibles al abrir (home + primeras filas)
+        val firstScreen = firstScreenCoverUrls()
+        PosterPreloader.warmPriority(context, firstScreen)
+
+        // Resto de categorías en segundo plano
+        val rest = browseCoverUrls().filterNot { it in firstScreen.toSet() }
+        PosterPreloader.warmBackground(context, rest)
     }
 
     fun clear() {
@@ -90,27 +93,28 @@ object Catalog {
         bump()
     }
 
-    /** Home + primeras filas visibles de películas/series. */
-    private fun priorityCoverUrls(): List<String> {
+    /** Portadas que se ven apenas entra al Hub. */
+    private fun firstScreenCoverUrls(): List<String> {
         val out = LinkedHashSet<String>()
-        val movies2026 = movies.filter { it.matchesYear(2026) }
-        val homeMovies = when {
-            movies2026.isNotEmpty() -> movies2026
-            else -> {
-                val firstId = movieShelves.firstOrNull()?.id
-                if (firstId != null) movies.filter { it.categoryId == firstId } else movies
-            }
-        }
-        homeMovies.take(48).mapNotNull { cleanUrl(it.streamIcon) }.forEach { out += it }
-
-        movieShelves.take(15).forEach { shelf ->
+        homeMovies().take(56).mapNotNull { cleanUrl(it.streamIcon) }.forEach { out += it }
+        movieShelves.take(8).forEach { shelf ->
             shelf.posters.take(10).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
         }
-        seriesShelves.take(15).forEach { shelf ->
+        seriesShelves.take(8).forEach { shelf ->
             shelf.posters.take(10).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
         }
         return out.toList()
     }
+
+    private fun homeMovies(): List<VodItem> {
+        val movies2026 = movies.filter { it.matchesYear(2026) }
+        if (movies2026.isNotEmpty()) return movies2026
+        val firstId = movieShelves.firstOrNull()?.id
+        return if (firstId != null) movies.filter { it.categoryId == firstId } else movies
+    }
+
+    /** Home + primeras filas visibles de películas/series. */
+    private fun priorityCoverUrls(): List<String> = firstScreenCoverUrls()
 
     /** Carátulas de filas de categorías (lo que se ve al navegar). */
     private fun browseCoverUrls(): List<String> {
