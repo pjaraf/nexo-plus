@@ -60,6 +60,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
@@ -144,6 +145,7 @@ class SeriesActivity : ComponentActivity() {
             var expandAfterChoice by remember { mutableStateOf(false) }
             var resumeResolved by remember { mutableStateOf(false) }
             val promptShowing = rememberUpdatedState(showResumePrompt)
+            val rootFocus = remember { FocusRequester() }
             val playFocus = remember { FocusRequester() }
             val density = LocalDensity.current
 
@@ -391,10 +393,13 @@ class SeriesActivity : ComponentActivity() {
                 toast = null
             }
 
-            LaunchedEffect(fullScreen, hudVisible) {
-                if (fullScreen && hudVisible) {
-                    delay(80)
+            LaunchedEffect(fullScreen, hudVisible, showResumePrompt) {
+                if (!fullScreen || showResumePrompt) return@LaunchedEffect
+                delay(80)
+                if (hudVisible) {
                     runCatching { playFocus.requestFocus() }
+                } else {
+                    runCatching { rootFocus.requestFocus() }
                 }
             }
 
@@ -436,6 +441,9 @@ class SeriesActivity : ComponentActivity() {
                 Modifier
                     .fillMaxSize()
                     .background(Color(0xFF0D0E15))
+                    .focusRequester(rootFocus)
+                    .focusProperties { canFocus = fullScreen && !hudVisible && !showResumePrompt }
+                    .focusable()
                     .onPreviewKeyEvent { e ->
                         if (!fullScreen || showResumePrompt) return@onPreviewKeyEvent false
                         if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -466,6 +474,8 @@ class SeriesActivity : ComponentActivity() {
                                 AndroidKeyEvent.KEYCODE_ENTER,
                                 AndroidKeyEvent.KEYCODE_DPAD_UP,
                                 AndroidKeyEvent.KEYCODE_DPAD_DOWN,
+                                AndroidKeyEvent.KEYCODE_INFO,
+                                AndroidKeyEvent.KEYCODE_MENU,
                                 AndroidKeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> {
                                     bumpHud(); true
                                 }
