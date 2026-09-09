@@ -1,6 +1,7 @@
 package com.nexo.tv.player
 
 import android.content.Context
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -41,8 +42,12 @@ class IjkEngine(private val context: Context) {
     private var lastUrl: String? = null
     private var lastOpenAt = 0L
     private var endedFiredForUrl: String? = null
+    private var audioRescueTriedForUrl: String? = null
+    private var audioCheck: Runnable? = null
 
     private val releaseExecutor = Executors.newSingleThreadExecutor()
+    private val audioManager =
+        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     enum class AspectMode { FILL, ZOOM, RATIO_16_9, RATIO_4_3, ORIGINAL }
     private var aspectMode = AspectMode.FILL
@@ -100,6 +105,7 @@ class IjkEngine(private val context: Context) {
         // Suelta el reproductor actual ya (deja de decodificar el canal viejo)
         killCurrentPlayer()
         lastUrl = null // forzar reopen aunque sea la misma URL
+        audioRescueTriedForUrl = null
         schedule(url, vod = false, debounceMs = debounceMs)
     }
 
@@ -356,22 +362,18 @@ class IjkEngine(private val context: Context) {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", 1L)
 
-        // Optimizacion de zapping instantaneo y ultra baja latencia
+        // Live: zapping rapido, pero con probe suficiente para encontrar la pista de audio en TS/HLS.
+        // probesize 32KB / 30ms dejaba video sin audio en muchos canales IPTV.
         if (!vod) {
-            // Cero buffering de paquetes para zapping instantaneo
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 0L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 1L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-fps", 60L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "min-frames", 2L)
-
-            // Deteccion ultrarrapida de cabecera TS (30ms / 32KB)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 30000L) // 30ms
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 32768L)      // 32KB
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 800000L) // 0.8s
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 1048576L)      // 1MB
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "fflags", "nobuffer")
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "flush_packets", 1L)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max_delay", 0L)
-
-            // Codec: omitir bucle de filtrado no referencial para renderizar el primer cuadro de inmediato
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max_delay", 100000L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48L)
         } else {
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 1L)
@@ -381,6 +383,9 @@ class IjkEngine(private val context: Context) {
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
+        // Audio por software: mas estable en TV Box HDMI (AC3/AAC) que mediacodec-audio
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-audio", 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "soundtouch", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "fast", 1L)
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", 1L)
@@ -389,12 +394,18 @@ class IjkEngine(private val context: Context) {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "timeout", 6000000L)
 
+        try {
+            p.setAudioStreamType(AudioManager.STREAM_MUSIC)
+        } catch (_: Throwable) {}
+
         val openGen = gen
 
         p.setOnPreparedListener { mp ->
             main.post {
                 if (released || openGen != gen || player !== p) return@post
+                ensureAudible(mp)
                 try { mp.start() } catch (_: Throwable) {}
+                scheduleAudioRescue(openGen)
                 onBuffering?.invoke(false)
                 onPlaying?.invoke()
             }
@@ -407,6 +418,8 @@ class IjkEngine(private val context: Context) {
                     IMediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering?.invoke(true)
                     IMediaPlayer.MEDIA_INFO_BUFFERING_END -> onBuffering?.invoke(false)
                     IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> {
+                        ensureAudible(p)
+                        scheduleAudioRescue(openGen)
                         onBuffering?.invoke(false)
                         onPlaying?.invoke()
                     }
@@ -456,11 +469,54 @@ class IjkEngine(private val context: Context) {
         return p
     }
 
+    private fun ensureAudible(mp: IMediaPlayer) {
+        try {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                null,
+                AudioManager.STREAM_MUSIC,
+                AudioManager.AUDIOFOCUS_GAIN
+            )
+        } catch (_: Throwable) {}
+        try {
+            mp.setVolume(1f, 1f)
+        } catch (_: Throwable) {}
+        try {
+            if (mp.getSelectedTrack(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO) < 0) {
+                val tracks = mp.trackInfo ?: return
+                val idx = tracks.indexOfFirst { it.trackType == ITrackInfo.MEDIA_TRACK_TYPE_AUDIO }
+                if (idx >= 0) mp.selectTrack(idx)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    /** Si hay video pero ninguna pista de audio, reabre el mismo canal una sola vez. */
+    private fun scheduleAudioRescue(openGen: Int) {
+        audioCheck?.let { main.removeCallbacks(it) }
+        val url = lastUrl ?: return
+        if (audioRescueTriedForUrl == url) return
+        val r = Runnable {
+            if (released || openGen != gen || player == null) return@Runnable
+            val tracks = audioTracks()
+            if (tracks.isNotEmpty()) {
+                ensureAudible(player ?: return@Runnable)
+                return@Runnable
+            }
+            audioRescueTriedForUrl = url
+            Log.w(TAG, "sin pista de audio; reabriendo mismo canal")
+            lastUrl = null
+            schedule(url, vod = false, debounceMs = 0L)
+        }
+        audioCheck = r
+        main.postDelayed(r, 1200L)
+    }
+
     fun release() {
         if (released) return
         released = true
         pending?.let { main.removeCallbacks(it) }
         seekFlush?.let { main.removeCallbacks(it) }
+        audioCheck?.let { main.removeCallbacks(it) }
         layout = null
         currentHolder = null
         val p = player
