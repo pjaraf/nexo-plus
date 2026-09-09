@@ -86,10 +86,18 @@ fun HubScreen(onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var tab by remember { mutableStateOf(Tab.HOME) }
-    val movies = Catalog.movies
-    val series = Catalog.series
+    var catalogGen by remember { mutableIntStateOf(Catalog.generation) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(120)
+            val g = Catalog.generation
+            if (g != catalogGen) catalogGen = g
+        }
+    }
+    val movies = remember(catalogGen) { Catalog.movies }
+    val series = remember(catalogGen) { Catalog.series }
     val movies2026 = remember(movies) { movies.filter { it.matchesYear(2026) } }
-    val firstShelf = remember(movies) { Catalog.movieShelves.firstOrNull() }
+    val firstShelf = remember(catalogGen, movies) { Catalog.movieShelves.firstOrNull() }
     val firstCategoryMovies = remember(movies, firstShelf) {
         if (firstShelf == null) emptyList()
         else {
@@ -191,14 +199,16 @@ fun HubScreen(onLogout: () -> Unit) {
                         .padding(start = 88.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
                         .fillMaxSize()
                 ) {
-                    val shelves = Catalog.seriesShelves
+                    val shelves = remember(catalogGen) { Catalog.seriesShelves }
                     if (shelves.isEmpty()) {
-                        Text(
-                            "No hay series en el catálogo",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 18.sp,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
+                        if (Catalog.ready) {
+                            Text(
+                                "No hay series en el catálogo",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 18.sp,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
                     } else {
                         CategoryBrowser(
                             shelves = shelves,
@@ -211,14 +221,16 @@ fun HubScreen(onLogout: () -> Unit) {
                         .padding(start = 88.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
                         .fillMaxSize()
                 ) {
-                    val shelves = Catalog.movieShelves
+                    val shelves = remember(catalogGen) { Catalog.movieShelves }
                     if (shelves.isEmpty()) {
-                        Text(
-                            "No hay películas en el catálogo",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 18.sp,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
+                        if (Catalog.ready) {
+                            Text(
+                                "No hay películas en el catálogo",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 18.sp,
+                                modifier = Modifier.align(Alignment.Center)
+                            )
+                        }
                     } else {
                         CategoryBrowser(
                             shelves = shelves,

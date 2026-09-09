@@ -21,6 +21,9 @@ import com.nexo.tv.ui.HubScreen
 import com.nexo.tv.ui.LoginScreen
 import com.nexo.tv.ui.SplashScreen
 import com.nexo.tv.ui.UpdateGate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class AppScreen { Loading, Login, Hub }
 
@@ -38,36 +41,37 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var screen by remember { mutableStateOf(start) }
-            var splashMsg by remember { mutableStateOf("Iniciando…") }
             var lastBackAt by remember { mutableLongStateOf(0L) }
 
             LaunchedEffect(screen) {
                 if (screen != AppScreen.Loading) return@LaunchedEffect
-                splashMsg = "Conectando…"
-                val ok = when {
-                    Session.isLoggedIn -> XtreamClient.login(
-                        Session.username,
-                        Session.password,
-                        preferredServer = Session.server
-                    )
-                    hasBoot -> XtreamClient.login(
-                        bootUser!!.trim(),
-                        bootPass!!,
-                        preferredServer = bootServer ?: Session.server
-                    )
-                    else -> false
+                val ok = withContext(Dispatchers.IO) {
+                    when {
+                        Session.isLoggedIn -> XtreamClient.login(
+                            Session.username,
+                            Session.password,
+                            preferredServer = Session.server
+                        )
+                        hasBoot -> XtreamClient.login(
+                            bootUser!!.trim(),
+                            bootPass!!,
+                            preferredServer = bootServer ?: Session.server
+                        )
+                        else -> false
+                    }
                 }
                 if (!ok) {
                     Catalog.clear()
                     screen = AppScreen.Login
                     return@LaunchedEffect
                 }
-                splashMsg = "Cargando películas y series…"
-                Catalog.preload(this@MainActivity) { msg -> splashMsg = msg }
+                // Abrir Hub al instante; catálogo y carátulas en segundo plano
                 screen = AppScreen.Hub
+                launch(Dispatchers.IO) {
+                    runCatching { Catalog.preload(this@MainActivity) }
+                }
             }
 
-            // Doble atrás para salir (en Hub o Login)
             BackHandler(enabled = screen == AppScreen.Hub || screen == AppScreen.Login) {
                 val now = System.currentTimeMillis()
                 if (now - lastBackAt < 2000L) {
@@ -84,7 +88,7 @@ class MainActivity : ComponentActivity() {
 
             Box(Modifier.fillMaxSize()) {
                 when (screen) {
-                    AppScreen.Loading -> SplashScreen(subtitle = splashMsg)
+                    AppScreen.Loading -> SplashScreen()
                     AppScreen.Login -> LoginScreen(onSuccess = { screen = AppScreen.Loading })
                     AppScreen.Hub -> HubScreen(
                         onLogout = {
@@ -102,7 +106,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onUserLeaveHint() {
-        // Home del mando: salir. No salir si abrimos Live/Movie/Series.
         super.onUserLeaveHint()
         if (AppExit.suppressHomeExit) {
             AppExit.suppressHomeExit = false

@@ -30,6 +30,14 @@ object Catalog {
     @Volatile var ready: Boolean = false
         private set
 
+    /** Incrementa cuando cambian películas/series para refrescar el Hub. */
+    @Volatile var generation: Int = 0
+        private set
+
+    private fun bump() {
+        generation++
+    }
+
     val movieShelves: List<CategoryShelf>
         get() = buildShelves(
             categories = movieCategories,
@@ -46,11 +54,11 @@ object Catalog {
             }
         )
 
-    suspend fun preload(
-        context: Context,
-        onStatus: (String) -> Unit = {}
-    ) = coroutineScope {
-        onStatus("Cargando películas y series…")
+    /**
+     * Carga el catálogo y precarga carátulas en segundo plano.
+     * No bloquea con mensajes: al terminar los datos hace [bump] para refrescar el Hub.
+     */
+    suspend fun preload(context: Context) = coroutineScope {
         val moviesJob = async { runCatching { XtreamClient.movies() }.getOrDefault(emptyList()) }
         val seriesJob = async { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
         val movieCatsJob = async { runCatching { XtreamClient.vodCategories() }.getOrDefault(emptyList()) }
@@ -60,18 +68,17 @@ object Catalog {
         movieCategories = movieCatsJob.await()
         seriesCategories = seriesCatsJob.await()
         ready = true
+        bump()
         android.util.Log.i(
             "Catalog",
             "ready movies=${movies.size} series=${series.size} " +
                 "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
         )
 
-        onStatus("Precargando carátulas…")
+        // Carátulas en segundo plano: no retienen la apertura del Hub
         val priority = priorityCoverUrls()
         val rest = browseCoverUrls().filterNot { it in priority.toSet() }
-        PosterPreloader.warmPriority(context, priority)
-        // El resto sigue en segundo plano al entrar al hub
-        PosterPreloader.warmBackground(context, rest)
+        PosterPreloader.warmBackground(context, priority + rest)
     }
 
     fun clear() {
@@ -80,6 +87,7 @@ object Catalog {
         movieCategories = emptyList()
         seriesCategories = emptyList()
         ready = false
+        bump()
     }
 
     /** Home + primeras filas visibles de películas/series. */
