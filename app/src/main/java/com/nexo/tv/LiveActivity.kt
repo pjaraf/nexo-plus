@@ -75,6 +75,7 @@ import com.nexo.tv.data.XtreamClient
 import com.nexo.tv.player.IjkEngine
 import com.nexo.tv.player.IjkVideoLayout
 import com.nexo.tv.player.StreamBridge
+import com.nexo.tv.ui.ChannelMaintenanceOverlay
 import com.nexo.tv.ui.Device
 import com.nexo.tv.ui.MobileLiveScreen
 import com.nexo.tv.ui.PosterImage
@@ -122,6 +123,8 @@ class LiveActivity : ComponentActivity() {
             var bannerTick by remember { mutableIntStateOf(0) }
             var showCategories by remember { mutableStateOf(false) }
             var hasVideoFrame by remember { mutableStateOf(false) }
+            var maintenance by remember { mutableStateOf(false) }
+            var playGen by remember { mutableIntStateOf(0) }
             var bootPlayed by remember { mutableStateOf(false) }
             val rootFocus = remember { FocusRequester() }
             val categoryFocus = remember { FocusRequester() }
@@ -141,10 +144,17 @@ class LiveActivity : ComponentActivity() {
                 engine.onPlaying = {
                     status = "Reproduciendo"
                     hasVideoFrame = true
+                    maintenance = false
                 }
-                engine.onError = { status = "Error de reproducción" }
+                engine.onError = {
+                    hasVideoFrame = false
+                    maintenance = true
+                }
                 engine.onBuffering = { buffering ->
-                    if (!buffering && engine.isPlaying) hasVideoFrame = true
+                    if (!buffering && engine.isPlaying) {
+                        hasVideoFrame = true
+                        maintenance = false
+                    }
                 }
                 onDispose { engine.release() }
             }
@@ -157,6 +167,8 @@ class LiveActivity : ComponentActivity() {
             fun playChannel(ch: LiveChannel, instant: Boolean = true) {
                 persistWatching(ch)
                 hasVideoFrame = false
+                maintenance = false
+                playGen++
                 val remote = XtreamClient.liveUrl(ch.id)
                 val revisiting = recentChannelIds.contains(ch.id)
                 // Historial de canales visitados en esta sesion (para volver atras al instante)
@@ -218,6 +230,15 @@ class LiveActivity : ComponentActivity() {
                 if (bannerTick == 0) return@LaunchedEffect
                 delay(3500)
                 showBanner = false
+            }
+
+            // Si no hay video en ~8s, mostrar mantenimiento automaticamente
+            LaunchedEffect(playGen) {
+                if (playGen == 0) return@LaunchedEffect
+                delay(8000)
+                if (!hasVideoFrame) {
+                    maintenance = true
+                }
             }
 
             LaunchedEffect(showCategories) {
@@ -412,36 +433,18 @@ class LiveActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize()
                     )
 
-                    // Evitar negro: logo/nombre del canal hasta el primer frame de video
-                    val placeholder = current ?: LiveBoot.savedChannel(this@LiveActivity)
-                    if (!hasVideoFrame && placeholder != null) {
-                        Box(
-                            Modifier
-                                .fillMaxSize()
-                                .background(Color(0xFF0A0A0A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            val icon = placeholder.streamIcon
-                            if (!icon.isNullOrBlank()) {
-                                PosterImage(
-                                    url = icon,
-                                    contentDescription = placeholder.name,
-                                    modifier = Modifier.size(160.dp),
-                                    contentScale = ContentScale.Fit
-                                )
-                            } else {
-                                Text(
-                                    text = placeholder.name.ifBlank { "TV en vivo" },
-                                    color = Color.White,
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                        }
+                    // Canal caido / sin senal: pantalla cinematografica (sin mensajes de carga al centro)
+                    AnimatedVisibility(
+                        visible = maintenance,
+                        enter = fadeIn(),
+                        exit = fadeOut(),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        ChannelMaintenanceOverlay()
                     }
 
                     // Banner canal (Popup sin foco: no bloquea el zapping)
-                    if (showBanner && current != null && !showCategories) {
+                    if (showBanner && current != null && !showCategories && !maintenance) {
                         Popup(
                             alignment = Alignment.CenterStart,
                             properties = PopupProperties(
@@ -496,14 +499,7 @@ class LiveActivity : ComponentActivity() {
                         }
                     }
 
-                    if (allChannels.isEmpty() && !loading) {
-                        Text(
-                            text = status,
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
+                    // Sin texto al centro en fullscreen (el mantenimiento tiene su propia UI)
                 }
             }
         }
