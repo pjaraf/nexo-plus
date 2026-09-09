@@ -68,6 +68,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import com.nexo.tv.data.LiveBoot
 import com.nexo.tv.data.LiveCategory
 import com.nexo.tv.data.LiveChannel
 import com.nexo.tv.data.XtreamClient
@@ -77,7 +78,9 @@ import com.nexo.tv.player.StreamBridge
 import com.nexo.tv.ui.Device
 import com.nexo.tv.ui.MobileLiveScreen
 import com.nexo.tv.ui.PosterImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 class LiveActivity : ComponentActivity() {
     /** Último canal reproducido (para guardar al ir a Home / cerrar). */
@@ -92,15 +95,17 @@ class LiveActivity : ComponentActivity() {
         intent.getStringExtra(EXTRA_SERVER)?.let { if (it.isNotBlank()) Session.server = it }
         StreamBridge.start()
         val engine = IjkEngine(this)
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences(LiveBoot.PREFS, Context.MODE_PRIVATE)
 
         fun persistWatching(ch: LiveChannel) {
             lastPlayed = ch
-            // Guardar canal + categoría del canal visto (no "Todas").
+            // Guardar canal + categoria del canal visto (no "Todas").
             val cat = ch.categoryId.orEmpty()
             prefs.edit()
-                .putString(KEY_CHANNEL, ch.id)
-                .putString(KEY_CATEGORY, cat)
+                .putString(LiveBoot.KEY_CHANNEL, ch.id)
+                .putString(LiveBoot.KEY_CATEGORY, cat)
+                .putString(LiveBoot.KEY_CHANNEL_NAME, ch.name)
+                .putString(LiveBoot.KEY_CHANNEL_ICON, ch.streamIcon.orEmpty())
                 .apply()
         }
 
@@ -108,14 +113,16 @@ class LiveActivity : ComponentActivity() {
             var allChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
             var categories by remember { mutableStateOf<List<LiveCategory>>(emptyList()) }
             var selectedCategoryId by remember {
-                mutableStateOf(prefs.getString(KEY_CATEGORY, null).orEmpty())
+                mutableStateOf(prefs.getString(LiveBoot.KEY_CATEGORY, null).orEmpty())
             }
             var index by remember { mutableIntStateOf(0) }
-            var loading by remember { mutableStateOf(true) }
+            var loading by remember { mutableStateOf(!LiveBoot.ready) }
             var status by remember { mutableStateOf("Cargando…") }
             var showBanner by remember { mutableStateOf(false) }
             var bannerTick by remember { mutableIntStateOf(0) }
             var showCategories by remember { mutableStateOf(false) }
+            var hasVideoFrame by remember { mutableStateOf(false) }
+            var bootPlayed by remember { mutableStateOf(false) }
             val rootFocus = remember { FocusRequester() }
             val categoryFocus = remember { FocusRequester() }
             val listState = rememberLazyListState()
@@ -131,8 +138,14 @@ class LiveActivity : ComponentActivity() {
             }
 
             DisposableEffect(engine) {
-                engine.onPlaying = { status = "Reproduciendo" }
+                engine.onPlaying = {
+                    status = "Reproduciendo"
+                    hasVideoFrame = true
+                }
                 engine.onError = { status = "Error de reproducción" }
+                engine.onBuffering = { buffering ->
+                    if (!buffering && engine.isPlaying) hasVideoFrame = true
+                }
                 onDispose { engine.release() }
             }
 
@@ -143,9 +156,10 @@ class LiveActivity : ComponentActivity() {
 
             fun playChannel(ch: LiveChannel, instant: Boolean = true) {
                 persistWatching(ch)
+                hasVideoFrame = false
                 val remote = XtreamClient.liveUrl(ch.id)
                 val revisiting = recentChannelIds.contains(ch.id)
-                // Historial de canales visitados en esta sesión (para volver atrás al instante)
+                // Historial de canales visitados en esta sesion (para volver atras al instante)
                 recentChannelIds.remove(ch.id)
                 recentChannelIds.add(0, ch.id)
                 while (recentChannelIds.size > 12) recentChannelIds.removeAt(recentChannelIds.lastIndex)
@@ -171,18 +185,18 @@ class LiveActivity : ComponentActivity() {
                 else allChannels.filter { it.categoryId == catId }.ifEmpty { allChannels }
                 if (list.isEmpty()) {
                     status = "Sin canales en categoría"
-                    prefs.edit().putString(KEY_CATEGORY, catId).apply()
+                    prefs.edit().putString(LiveBoot.KEY_CATEGORY, catId).apply()
                     return
                 }
-                // Retomar último canal de esta categoría si existe; si no, el primero.
-                val savedId = prefs.getString(KEY_CHANNEL, null).orEmpty()
+                // Retomar ultimo canal de esta categoria si existe; si no, el primero.
+                val savedId = prefs.getString(LiveBoot.KEY_CHANNEL, null).orEmpty()
                 val resumeIdx = list.indexOfFirst { it.id == savedId }.takeIf { it >= 0 } ?: 0
                 index = resumeIdx
-                // playChannel guarda canal + categoría del canal visto
+                // playChannel guarda canal + categoria del canal visto
                 playChannel(list[resumeIdx], instant = true)
-                // Si eligió "Todas", persistir filtro vacío aparte del canal.
+                // Si eligio "Todas", persistir filtro vacio aparte del canal.
                 if (catId.isBlank()) {
-                    prefs.edit().putString(KEY_CATEGORY, "").apply()
+                    prefs.edit().putString(LiveBoot.KEY_CATEGORY, "").apply()
                 }
                 runCatching { rootFocus.requestFocus() }
             }
@@ -222,33 +236,52 @@ class LiveActivity : ComponentActivity() {
             }
 
             LaunchedEffect(Unit) {
-                val cats = runCatching { XtreamClient.liveCategories() }.getOrDefault(emptyList())
-                val streams = runCatching { XtreamClient.liveChannels() }.getOrDefault(emptyList())
-                    .filter { it.id.isNotBlank() }
-                categories = buildList {
-                    add(LiveCategory(categoryId = "", categoryName = "Todas"))
-                    addAll(cats.filter { it.categoryId.isNotBlank() })
+                // 1) Reproducir al instante el ultimo canal (ya calentado en el splash).
+                val boot = LiveBoot.savedChannel(this@LiveActivity)
+                if (boot != null && !bootPlayed) {
+                    bootPlayed = true
+                    selectedCategoryId = boot.categoryId.orEmpty()
+                    status = boot.name
+                    // Pequeña espera para que el SurfaceView este listo
+                    delay(40)
+                    playChannel(boot, instant = false)
                 }
+
+                // 2) Lista de canales: usar cache del splash o pedirla ahora.
+                val (cats, streams) = if (LiveBoot.ready && LiveBoot.channels.isNotEmpty()) {
+                    LiveBoot.categories to LiveBoot.channels
+                } else {
+                    withContext(Dispatchers.IO) {
+                        val c = runCatching { XtreamClient.liveCategories() }.getOrDefault(emptyList())
+                        val s = runCatching { XtreamClient.liveChannels() }.getOrDefault(emptyList())
+                            .filter { it.id.isNotBlank() }
+                        val built = buildList {
+                            add(LiveCategory(categoryId = "", categoryName = "Todas"))
+                            addAll(c.filter { it.categoryId.isNotBlank() })
+                        }
+                        built to s
+                    }
+                }
+                categories = cats
                 allChannels = streams
                 loading = false
 
-                val savedChannelId = prefs.getString(KEY_CHANNEL, null).orEmpty()
+                val savedChannelId = prefs.getString(LiveBoot.KEY_CHANNEL, null).orEmpty()
                 val savedChannel = streams.firstOrNull { it.id == savedChannelId }
 
-                // Al reabrir: categoría del último canal visto (+ ese canal).
                 val catId = when {
                     savedChannel != null -> savedChannel.categoryId.orEmpty()
                     else -> {
-                        val raw = prefs.getString(KEY_CATEGORY, null).orEmpty()
+                        val raw = prefs.getString(LiveBoot.KEY_CATEGORY, null).orEmpty()
                         if (raw.isNotBlank() && cats.any { it.categoryId == raw }) raw else ""
                     }
                 }
                 selectedCategoryId = catId
-                prefs.edit().putString(KEY_CATEGORY, catId).apply()
+                prefs.edit().putString(LiveBoot.KEY_CATEGORY, catId).apply()
 
                 android.util.Log.i(
                     "LiveActivity",
-                    "channels=${streams.size} cats=${cats.size} cat=$catId ch=$savedChannelId"
+                    "channels=${streams.size} cats=${cats.size} cat=$catId ch=$savedChannelId boot=$bootPlayed"
                 )
 
                 val list = if (catId.isBlank()) streams
@@ -262,11 +295,18 @@ class LiveActivity : ComponentActivity() {
                 val start = list.getOrNull(playIdx)
                 if (start != null) {
                     index = playIdx
-                    playChannel(start, instant = true)
-                } else {
+                    // Si ya arranco el boot con el mismo id, no reabrir (evita flash negro).
+                    if (!bootPlayed || start.id != boot?.id) {
+                        playChannel(start, instant = true)
+                    } else {
+                        // Actualizar metadata/index sin matar el stream
+                        persistWatching(start)
+                        status = start.name
+                    }
+                } else if (!bootPlayed) {
                     status = "Sin canales"
                 }
-                delay(120)
+                delay(80)
                 runCatching { rootFocus.requestFocus() }
             }
 
@@ -372,6 +412,34 @@ class LiveActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize()
                     )
 
+                    // Evitar negro: logo/nombre del canal hasta el primer frame de video
+                    val placeholder = current ?: LiveBoot.savedChannel(this@LiveActivity)
+                    if (!hasVideoFrame && placeholder != null) {
+                        Box(
+                            Modifier
+                                .fillMaxSize()
+                                .background(Color(0xFF0A0A0A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            val icon = placeholder.streamIcon
+                            if (!icon.isNullOrBlank()) {
+                                PosterImage(
+                                    url = icon,
+                                    contentDescription = placeholder.name,
+                                    modifier = Modifier.size(160.dp),
+                                    contentScale = ContentScale.Fit
+                                )
+                            } else {
+                                Text(
+                                    text = placeholder.name.ifBlank { "TV en vivo" },
+                                    color = Color.White,
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                    }
+
                     // Banner canal (Popup sin foco: no bloquea el zapping)
                     if (showBanner && current != null && !showCategories) {
                         Popup(
@@ -443,9 +511,11 @@ class LiveActivity : ComponentActivity() {
 
     override fun onPause() {
         lastPlayed?.let { ch ->
-            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(KEY_CHANNEL, ch.id)
-                .putString(KEY_CATEGORY, ch.categoryId.orEmpty())
+            getSharedPreferences(LiveBoot.PREFS, Context.MODE_PRIVATE).edit()
+                .putString(LiveBoot.KEY_CHANNEL, ch.id)
+                .putString(LiveBoot.KEY_CATEGORY, ch.categoryId.orEmpty())
+                .putString(LiveBoot.KEY_CHANNEL_NAME, ch.name)
+                .putString(LiveBoot.KEY_CHANNEL_ICON, ch.streamIcon.orEmpty())
                 .apply()
         }
         super.onPause()
@@ -453,9 +523,11 @@ class LiveActivity : ComponentActivity() {
 
     override fun onStop() {
         lastPlayed?.let { ch ->
-            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(KEY_CHANNEL, ch.id)
-                .putString(KEY_CATEGORY, ch.categoryId.orEmpty())
+            getSharedPreferences(LiveBoot.PREFS, Context.MODE_PRIVATE).edit()
+                .putString(LiveBoot.KEY_CHANNEL, ch.id)
+                .putString(LiveBoot.KEY_CATEGORY, ch.categoryId.orEmpty())
+                .putString(LiveBoot.KEY_CHANNEL_NAME, ch.name)
+                .putString(LiveBoot.KEY_CHANNEL_ICON, ch.streamIcon.orEmpty())
                 .apply()
         }
         super.onStop()
@@ -464,9 +536,11 @@ class LiveActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         // Home: guardar canal
         lastPlayed?.let { ch ->
-            getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putString(KEY_CHANNEL, ch.id)
-                .putString(KEY_CATEGORY, ch.categoryId.orEmpty())
+            getSharedPreferences(LiveBoot.PREFS, Context.MODE_PRIVATE).edit()
+                .putString(LiveBoot.KEY_CHANNEL, ch.id)
+                .putString(LiveBoot.KEY_CATEGORY, ch.categoryId.orEmpty())
+                .putString(LiveBoot.KEY_CHANNEL_NAME, ch.name)
+                .putString(LiveBoot.KEY_CHANNEL_ICON, ch.streamIcon.orEmpty())
                 .apply()
         }
         super.onUserLeaveHint()
@@ -479,9 +553,6 @@ class LiveActivity : ComponentActivity() {
         const val EXTRA_USER = "user"
         const val EXTRA_PASS = "pass"
         const val EXTRA_SERVER = "server"
-        private const val PREFS = "nexo_live"
-        private const val KEY_CATEGORY = "category_id"
-        private const val KEY_CHANNEL = "channel_id"
         private const val KEY_FAVORITES = "favorites"
     }
 }

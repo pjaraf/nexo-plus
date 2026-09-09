@@ -63,6 +63,9 @@ object Catalog {
         val seriesJob = async { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
         val movieCatsJob = async { runCatching { XtreamClient.vodCategories() }.getOrDefault(emptyList()) }
         val seriesCatsJob = async { runCatching { XtreamClient.seriesCategories() }.getOrDefault(emptyList()) }
+        // TV en vivo: lista + calentar ultimo canal mientras carga el Hub
+        val liveJob = async { runCatching { LiveBoot.preload(context) } }
+
         movies = moviesJob.await()
         series = seriesJob.await()
         movieCategories = movieCatsJob.await()
@@ -75,11 +78,13 @@ object Catalog {
                 "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
         )
 
-        // Esperar carátulas visibles al abrir (home + primeras filas)
+        // Esperar caratulas visibles al abrir (home + primeras filas)
         val firstScreen = firstScreenCoverUrls()
         PosterPreloader.warmPriority(context, firstScreen)
 
-        // Resto de categorías en segundo plano
+        liveJob.await()
+
+        // Resto de categorias en segundo plano
         val rest = browseCoverUrls().filterNot { it in firstScreen.toSet() }
         PosterPreloader.warmBackground(context, rest)
     }
@@ -90,6 +95,7 @@ object Catalog {
         movieCategories = emptyList()
         seriesCategories = emptyList()
         ready = false
+        LiveBoot.clear()
         bump()
     }
 
