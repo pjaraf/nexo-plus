@@ -13,7 +13,7 @@ import okhttp3.Request
  * Precarga canales en vivo y calienta el último canal visto durante el splash,
  * para que al abrir TV en vivo no haya espera ni pantalla negra.
  */
-object LiveBoot {
+object LiveBoot { // encoding: utf-8
     private const val TAG = "LiveBoot"
     const val PREFS = "nexo_live"
     const val KEY_CHANNEL = "channel_id"
