@@ -1,8 +1,8 @@
 package com.nexo.tv.update
 
-import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -113,17 +113,69 @@ object AppUpdater {
 
     fun canInstallPackages(context: Context): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.packageManager.canRequestPackageInstalls()
+            try {
+                context.packageManager.canRequestPackageInstalls()
+            } catch (_: Throwable) {
+                false
+            }
         } else true
     }
 
-    fun openInstallPermission(activity: Activity) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                Uri.parse("package:${activity.packageName}")
+    /**
+     * Abre la pantalla para habilitar “Instalar apps desconocidas” en teléfono, tablet y TV Box.
+     * Prueba varios intents porque cada fabricante/Android TV usa rutas distintas.
+     */
+    fun openInstallPermission(context: Context): Boolean {
+        val pkg = context.packageName
+        val candidates = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                add(
+                    Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:$pkg")
+                    )
+                )
+                add(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES))
+            }
+            // Detalle de la app (desde ahí a menudo se llega a “Instalar apps desconocidas”)
+            add(
+                Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$pkg")
+                )
             )
-            activity.startActivity(intent)
+            // Android antiguo / algunos TV boxes
+            add(Intent(Settings.ACTION_SECURITY_SETTINGS))
+            add(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS))
+            add(Intent(Settings.ACTION_SETTINGS))
+        }
+
+        for (raw in candidates) {
+            val intent = Intent(raw).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (context !is Activity) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (!canResolve(context, intent)) continue
+            try {
+                context.startActivity(intent)
+                Log.i(TAG, "opened install permission via ${intent.action}")
+                return true
+            } catch (e: Throwable) {
+                Log.w(TAG, "intent failed ${intent.action}: ${e.message}")
+            }
+        }
+        Log.e(TAG, "no install-permission settings activity found")
+        return false
+    }
+
+    private fun canResolve(context: Context, intent: Intent): Boolean {
+        return try {
+            intent.resolveActivity(context.packageManager) != null ||
+                context.packageManager
+                    .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+                    .isNotEmpty()
+        } catch (_: Throwable) {
+            true // intentar de todos modos en TV boxes raros
         }
     }
 
