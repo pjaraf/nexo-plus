@@ -1,5 +1,6 @@
 package com.nexo.tv.ui
 
+import android.graphics.BitmapFactory
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -18,25 +19,33 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nexo.tv.R
 
 /**
  * Pantalla cinematografica cuando un canal no carga / esta caido.
  */
 @Composable
 fun ChannelMaintenanceOverlay(modifier: Modifier = Modifier) {
+    val ctx = LocalContext.current
+    val bitmap = remember {
+        runCatching {
+            ctx.assets.open("live_maintenance_bg.jpg").use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
+
     val pulse = rememberInfiniteTransition(label = "maint")
     val lineAlpha by pulse.animateFloat(
         initialValue = 0.35f,
@@ -49,12 +58,20 @@ fun ChannelMaintenanceOverlay(modifier: Modifier = Modifier) {
     )
 
     Box(modifier.fillMaxSize()) {
-        Image(
-            painter = painterResource(R.drawable.live_maintenance_bg),
-            contentDescription = null,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        } else {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0B0B0B))
+            )
+        }
         Box(
             Modifier
                 .fillMaxSize()
