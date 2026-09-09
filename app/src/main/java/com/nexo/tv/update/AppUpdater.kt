@@ -83,17 +83,26 @@ object AppUpdater {
                     val out = File(context.cacheDir, "nexo-update.apk")
                     body.byteStream().use { input ->
                         FileOutputStream(out).use { output ->
-                            val buf = ByteArray(16 * 1024)
+                            val buf = ByteArray(256 * 1024)
                             var read = 0L
+                            var lastPct = -1
                             while (true) {
                                 val n = input.read(buf)
                                 if (n <= 0) break
                                 output.write(buf, 0, n)
                                 read += n
-                                if (total > 0) onProgress(((read * 100) / total).toInt())
+                                if (total > 0) {
+                                    val pct = ((read * 100) / total).toInt().coerceIn(0, 100)
+                                    if (pct != lastPct) {
+                                        lastPct = pct
+                                        onProgress(pct)
+                                    }
+                                }
                             }
+                            output.flush()
                         }
                     }
+                    onProgress(100)
                     out
                 }
             } catch (e: Throwable) {
