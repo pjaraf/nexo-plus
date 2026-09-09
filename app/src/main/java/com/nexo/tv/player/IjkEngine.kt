@@ -332,10 +332,6 @@ class IjkEngine(private val context: Context) {
 
         // Por si quedó un reproductor de un zap intermedio
         killCurrentPlayer()
-        if (!vod) {
-            // Asegura sesión limpia justo antes de abrir (por si hubo zaps durante el debounce)
-            StreamBridge.beginLiveSession()
-        }
 
         val p = createConfiguredPlayer(vod)
         player = p
