@@ -2,6 +2,7 @@ package com.nexo.tv.player
 
 import android.util.Log
 import com.nexo.tv.data.Http
+import okhttp3.Call
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Request
 import java.io.BufferedReader
@@ -17,12 +18,18 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Puente ultra rápido local para flujos HTTPS.
  * OkHttp maneja TLS 1.3 certificado y entrega el flujo a IjkPlayer por 127.0.0.1 con tcpNoDelay.
+ *
+ * Al cambiar de canal, [beginLiveSession] mata al instante todas las descargas y sockets
+ * de sesiones anteriores para liberar ancho de banda de inmediato.
  */
 object StreamBridge {
     private const val TAG = "StreamBridge"
     private val running = AtomicBoolean(false)
     private val seq = AtomicInteger(0)
+    private val sessionId = AtomicInteger(0)
     private val targets = ConcurrentHashMap<String, String>()
+    private val activeCalls = ConcurrentHashMap<Call, Int>()
+    private val activeSockets = ConcurrentHashMap<Socket, Int>()
     private val pool = Executors.newCachedThreadPool()
     @Volatile private var port: Int = 0
     private var server: ServerSocket? = null
@@ -51,6 +58,34 @@ object StreamBridge {
         Log.i(TAG, "listening on 127.0.0.1:$port")
     }
 
+    /**
+     * Nueva sesión de canal en vivo: cancela llamadas OkHttp y cierra sockets de sesiones viejas.
+     * Las conexiones de la sesión nueva no se tocan.
+     */
+    fun beginLiveSession(): Int {
+        val next = sessionId.incrementAndGet()
+        var killedCalls = 0
+        var killedSocks = 0
+        activeCalls.entries.removeIf { (call, sid) ->
+            if (sid < next) {
+                try { call.cancel() } catch (_: Throwable) {}
+                killedCalls++
+                true
+            } else false
+        }
+        activeSockets.entries.removeIf { (socket, sid) ->
+            if (sid < next) {
+                try { socket.close() } catch (_: Throwable) {}
+                killedSocks++
+                true
+            } else false
+        }
+        if (killedCalls > 0 || killedSocks > 0) {
+            Log.i(TAG, "killed stale session<$next calls=$killedCalls sockets=$killedSocks")
+        }
+        return next
+    }
+
     fun wrap(remoteUrl: String): String {
         start()
         val id = seq.incrementAndGet().toString()
@@ -65,17 +100,21 @@ object StreamBridge {
     }
 
     private fun handle(socket: Socket) {
+        val mySession = sessionId.get()
         socket.soTimeout = 60_000
         socket.tcpNoDelay = true
+        activeSockets[socket] = mySession
+        var call: Call? = null
         try {
+            if (mySession < sessionId.get()) return
+
             val input = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.ISO_8859_1))
             val requestLine = input.readLine() ?: return
             val parts = requestLine.split(" ")
             if (parts.size < 2) return
             val rawPath = parts[1].trimStart('/')
             val id = rawPath.substringBefore("?").substringBefore("/")
-            
-            // Buscar URL remota por ID o resolver como ruta relativa contra lastRemoteUrl
+
             val remote = targets[id] ?: lastRemoteUrl?.let { base ->
                 val baseHttp = base.toHttpUrlOrNull()
                 baseHttp?.resolve(rawPath)?.toString()
@@ -98,6 +137,8 @@ object StreamBridge {
                 if (name.equals("Range", ignoreCase = true)) rangeHeader = value
             }
 
+            if (mySession < sessionId.get()) return
+
             val reqBuilder = Request.Builder()
                 .url(remote)
                 .header("User-Agent", "IPTVSmartersPro")
@@ -106,7 +147,16 @@ object StreamBridge {
                 reqBuilder.header("Range", rangeHeader)
             }
 
-            Http.client.newCall(reqBuilder.build()).execute().use { resp ->
+            val built = Http.client.newCall(reqBuilder.build())
+            call = built
+            activeCalls[built] = mySession
+            if (mySession < sessionId.get()) {
+                built.cancel()
+                return
+            }
+
+            built.execute().use { resp ->
+                if (mySession < sessionId.get()) return
                 if (!resp.isSuccessful && resp.code != 206) {
                     writeStatus(out, resp.code, "Error", emptyMap(), 0)
                     return
@@ -123,6 +173,7 @@ object StreamBridge {
                     (finalUrl.contains(".m3u8", true) && !ctype.contains("video/") && !ctype.contains("mp2t"))
                 if (isPlaylist) {
                     val text = body.string()
+                    if (mySession < sessionId.get()) return
                     val rewritten = rewritePlaylist(text, finalUrl)
                     val bytes = rewritten.toByteArray(Charsets.UTF_8)
                     writeStatus(
@@ -155,13 +206,22 @@ object StreamBridge {
                         headers["Content-Length"] = declaredLen.toString()
                     }
                     writeStatus(out, status, reason, headers, if (headers.containsKey("Content-Length")) -2 else declaredLen)
-                    body.byteStream().copyTo(out)
-                    out.flush()
+                    val inputStream = body.byteStream()
+                    val buf = ByteArray(64 * 1024)
+                    while (true) {
+                        if (mySession < sessionId.get()) break
+                        val n = inputStream.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        out.flush()
+                    }
                 }
             }
         } catch (e: Throwable) {
-            // Socket cerrado normalmente al cambiar de canal
+            // Socket/call cerrado al cambiar de canal (sesión matada)
         } finally {
+            call?.let { activeCalls.remove(it) }
+            activeSockets.remove(socket)
             try { socket.close() } catch (_: Throwable) {}
         }
     }

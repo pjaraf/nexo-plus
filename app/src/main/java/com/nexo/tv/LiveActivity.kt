@@ -119,6 +119,7 @@ class LiveActivity : ComponentActivity() {
             val rootFocus = remember { FocusRequester() }
             val categoryFocus = remember { FocusRequester() }
             val listState = rememberLazyListState()
+            val recentChannelIds = remember { mutableListOf<String>() }
 
             val activeChannels = remember(allChannels, selectedCategoryId) {
                 if (selectedCategoryId.isBlank()) allChannels
@@ -143,10 +144,24 @@ class LiveActivity : ComponentActivity() {
             fun playChannel(ch: LiveChannel, instant: Boolean = true) {
                 persistWatching(ch)
                 val remote = XtreamClient.liveUrl(ch.id)
-                android.util.Log.i("LiveActivity", "play $remote")
+                val revisiting = recentChannelIds.contains(ch.id)
+                // Historial de canales visitados en esta sesión (para volver atrás al instante)
+                recentChannelIds.remove(ch.id)
+                recentChannelIds.add(0, ch.id)
+                while (recentChannelIds.size > 12) recentChannelIds.removeAt(recentChannelIds.lastIndex)
+
+                android.util.Log.i(
+                    "LiveActivity",
+                    "play ${ch.name} id=${ch.id} revisit=$revisiting instant=$instant"
+                )
                 status = ch.name
                 revealBanner()
-                engine.playNow(remote)
+                when {
+                    // Canal ya pasado: matar anteriores y abrir sin debounce
+                    revisiting -> engine.playRecent(remote)
+                    instant -> engine.playZap(remote)
+                    else -> engine.playNow(remote)
+                }
             }
 
             fun selectCategory(catId: String) {

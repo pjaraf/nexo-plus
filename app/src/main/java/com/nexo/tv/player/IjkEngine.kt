@@ -83,11 +83,35 @@ class IjkEngine(private val context: Context) {
         } catch (_: Throwable) {}
     }
 
-    fun playNow(url: String) = schedule(url, vod = false)
+    fun playNow(url: String) = switchLive(url, debounceMs = 0L)
 
-    fun playVod(url: String) = schedule(url, vod = true)
+    fun playVod(url: String) = schedule(url, vod = true, debounceMs = 0L)
 
-    fun playZap(url: String) = schedule(url, vod = false)
+    /** Zapping rápido: mata streams anteriores al instante y abre el canal tras un debounce corto. */
+    fun playZap(url: String) = switchLive(url, debounceMs = ZAP_DEBOUNCE_MS)
+
+    /** Canal reciente al volver atrás: mata anteriores y abre sin esperar. */
+    fun playRecent(url: String) = switchLive(url, debounceMs = 0L)
+
+    private fun switchLive(url: String, debounceMs: Long) {
+        if (released || url.isBlank()) return
+        // Mata de inmediato descargas/sockets de canales anteriores
+        StreamBridge.beginLiveSession()
+        // Suelta el reproductor actual ya (deja de decodificar el canal viejo)
+        killCurrentPlayer()
+        lastUrl = null // forzar reopen aunque sea la misma URL
+        schedule(url, vod = false, debounceMs = debounceMs)
+    }
+
+    private fun killCurrentPlayer() {
+        val old = player ?: return
+        player = null
+        try { old.setDisplay(null) } catch (_: Throwable) {}
+        releaseExecutor.execute {
+            try { old.stop() } catch (_: Throwable) {}
+            try { old.release() } catch (_: Throwable) {}
+        }
+    }
 
     fun togglePause() {
         if (released) return
@@ -275,7 +299,7 @@ class IjkEngine(private val context: Context) {
         }
     }
 
-    private fun schedule(url: String, vod: Boolean) {
+    private fun schedule(url: String, vod: Boolean, debounceMs: Long = 0L) {
         if (released || url.isBlank()) return
         if (url == lastUrl && isPlayingSafe()) return
         lastUrl = url
@@ -283,16 +307,15 @@ class IjkEngine(private val context: Context) {
         val myGen = ++gen
         pending?.let { main.removeCallbacks(it) }
 
-        // Si ya estamos en el hilo principal, ejecutamos inmediatamente sin encolar
-        if (Looper.myLooper() == Looper.getMainLooper()) {
+        val r = Runnable {
+            if (released || myGen != gen) return@Runnable
             openMedia(url, vod)
+        }
+        pending = r
+        if (debounceMs <= 0L && Looper.myLooper() == Looper.getMainLooper()) {
+            r.run()
         } else {
-            val r = Runnable {
-                if (released || myGen != gen) return@Runnable
-                openMedia(url, vod)
-            }
-            pending = r
-            main.post(r)
+            main.postDelayed(r, debounceMs.coerceAtLeast(0L))
         }
     }
 
@@ -307,20 +330,15 @@ class IjkEngine(private val context: Context) {
         lastOpenAt = SystemClock.uptimeMillis()
         onBuffering?.invoke(true)
 
-        val oldPlayer = player
+        // Por si quedó un reproductor de un zap intermedio
+        killCurrentPlayer()
+        if (!vod) {
+            // Asegura sesión limpia justo antes de abrir (por si hubo zaps durante el debounce)
+            StreamBridge.beginLiveSession()
+        }
+
         val p = createConfiguredPlayer(vod)
         player = p
-
-        // Desvincular de inmediato del surface y liberar el reproductor anterior en hilo secundario
-        if (oldPlayer != null) {
-            try { oldPlayer.setDisplay(null) } catch (_: Throwable) {}
-            releaseExecutor.execute {
-                try {
-                    oldPlayer.stop()
-                    oldPlayer.release()
-                } catch (_: Throwable) {}
-            }
-        }
 
         try {
             currentHolder?.let { p.setDisplay(it) }
@@ -459,5 +477,7 @@ class IjkEngine(private val context: Context) {
 
     companion object {
         private const val TAG = "IjkEngine"
+        /** Espera corta al zapear rápido: solo el último canal abre, matando los anteriores al instante. */
+        private const val ZAP_DEBOUNCE_MS = 55L
     }
 }
