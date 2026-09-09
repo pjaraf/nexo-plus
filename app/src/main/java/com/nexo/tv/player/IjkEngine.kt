@@ -482,10 +482,11 @@ class IjkEngine(private val context: Context) {
             mp.setVolume(1f, 1f)
         } catch (_: Throwable) {}
         try {
-            if (mp.getSelectedTrack(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO) < 0) {
-                val tracks = mp.trackInfo ?: return
+            val ijk = mp as? IjkMediaPlayer ?: return
+            if (ijk.getSelectedTrack(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO) < 0) {
+                val tracks = ijk.trackInfo ?: return
                 val idx = tracks.indexOfFirst { it.trackType == ITrackInfo.MEDIA_TRACK_TYPE_AUDIO }
-                if (idx >= 0) mp.selectTrack(idx)
+                if (idx >= 0) ijk.selectTrack(idx)
             }
         } catch (_: Throwable) {}
     }
