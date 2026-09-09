@@ -393,9 +393,11 @@ class IjkEngine(private val context: Context) {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "timeout", 6000000L)
 
+        val openGen = gen
+
         p.setOnPreparedListener { mp ->
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 try { mp.start() } catch (_: Throwable) {}
                 onBuffering?.invoke(false)
                 onPlaying?.invoke()
@@ -404,7 +406,7 @@ class IjkEngine(private val context: Context) {
 
         p.setOnInfoListener { _, what, _ ->
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 when (what) {
                     IMediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering?.invoke(true)
                     IMediaPlayer.MEDIA_INFO_BUFFERING_END -> onBuffering?.invoke(false)
@@ -419,14 +421,14 @@ class IjkEngine(private val context: Context) {
 
         p.setOnBufferingUpdateListener { _, percent ->
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 onBuffering?.invoke(percent < 90)
             }
         }
 
         p.setOnCompletionListener {
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 val url = lastUrl
                 if (url != null && endedFiredForUrl != url) {
                     endedFiredForUrl = url
@@ -436,9 +438,11 @@ class IjkEngine(private val context: Context) {
         }
 
         p.setOnErrorListener { _, what, extra ->
+            // Ignorar errores de reproductores ya descartados al cambiar de canal
+            if (released || openGen != gen) return@setOnErrorListener true
             Log.e(TAG, "Error de reproductor Ijk: what=$what extra=$extra")
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 onError?.invoke()
             }
             true
@@ -446,7 +450,7 @@ class IjkEngine(private val context: Context) {
 
         p.setOnVideoSizeChangedListener { _, width, height, _, _ ->
             main.post {
-                if (released) return@post
+                if (released || openGen != gen || player !== p) return@post
                 if (width > 0 && height > 0) {
                     layout?.setVideoSize(width, height)
                 }
