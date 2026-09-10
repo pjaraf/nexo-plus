@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.nexo.tv.AppExit
@@ -77,16 +78,61 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val Orange = Color(0xFFDE5B17)
+private val HubBg = Color(0xFF0D0E15)
 private val PosterW = 132.dp
 private val PosterH = 188.dp
 
 private enum class Tab { HOME, TV, SERIES, MOVIES }
+
+/** Fondo cinematográfico como en ficha de película (carátula + oscurecido). */
+@Composable
+private fun HubCinematicBackdrop(url: String?) {
+    Box(Modifier.fillMaxSize().background(HubBg)) {
+        if (!url.isNullOrBlank()) {
+            PosterImage(
+                url = url,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().zIndex(0f)
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(1f)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.78f),
+                                HubBg.copy(alpha = 0.88f),
+                                Color(0xFF08090E).copy(alpha = 0.97f)
+                            )
+                        )
+                    )
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .zIndex(1f)
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.Black.copy(alpha = 0.88f),
+                                Color.Black.copy(alpha = 0.55f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+    }
+}
 
 @Composable
 fun HubScreen(onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var tab by remember { mutableStateOf(Tab.HOME) }
+    var hubBackdropUrl by remember { mutableStateOf<String?>(null) }
     val catalogGen by Catalog.generationFlow.collectAsState()
     val movies = remember(catalogGen) { Catalog.movies }
     val series = remember(catalogGen) { Catalog.series }
@@ -182,14 +228,15 @@ fun HubScreen(onLogout: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        LoginBackdrop()
+        HubCinematicBackdrop(url = if (tab == Tab.TV) null else hubBackdropUrl)
 
         Box(Modifier.fillMaxSize()) {
             when (tab) {
                 Tab.HOME -> HomePane(
                     title = homeCategoryTitle,
                     movies = homeMovies,
-                    onMovie = { openMovie(it) }
+                    onMovie = { openMovie(it) },
+                    onFeaturedChange = { hubBackdropUrl = it?.streamIcon }
                 )
                 Tab.SERIES -> Box(
                     Modifier
@@ -209,7 +256,8 @@ fun HubScreen(onLogout: () -> Unit) {
                     } else {
                         CategoryBrowser(
                             shelves = shelves,
-                            onPoster = { id -> seriesById[id]?.let { openSeries(it) } }
+                            onPoster = { id -> seriesById[id]?.let { openSeries(it) } },
+                            onFocusCover = { hubBackdropUrl = it }
                         )
                     }
                 }
@@ -231,7 +279,8 @@ fun HubScreen(onLogout: () -> Unit) {
                     } else {
                         CategoryBrowser(
                             shelves = shelves,
-                            onPoster = { id -> moviesById[id]?.let { openMovie(it) } }
+                            onPoster = { id -> moviesById[id]?.let { openMovie(it) } },
+                            onFocusCover = { hubBackdropUrl = it }
                         )
                     }
                 }
@@ -311,9 +360,16 @@ private fun NavIcon(
 private fun HomePane(
     title: String,
     movies: List<VodItem>,
-    onMovie: (VodItem) -> Unit
+    onMovie: (VodItem) -> Unit,
+    onFeaturedChange: (VodItem?) -> Unit
 ) {
     var featured by remember(movies) { mutableStateOf(movies.firstOrNull()) }
+    LaunchedEffect(featured) { onFeaturedChange(featured) }
+    LaunchedEffect(movies) {
+        if (featured == null || movies.none { it.id == featured?.id }) {
+            featured = movies.firstOrNull()
+        }
+    }
 
     Column(
         Modifier
@@ -403,7 +459,8 @@ private fun HomePane(
 @Composable
 private fun CategoryBrowser(
     shelves: List<CategoryShelf>,
-    onPoster: (String) -> Unit
+    onPoster: (String) -> Unit,
+    onFocusCover: (String?) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf<CategoryShelf?>(null) }
 
@@ -428,7 +485,8 @@ private fun CategoryBrowser(
             }
             PosterGrid(
                 items = gridItems,
-                onClick = onPoster
+                onClick = onPoster,
+                onFocusCover = onFocusCover
             )
         }
     } else {
@@ -441,6 +499,7 @@ private fun CategoryBrowser(
                 CategoryShelfRow(
                     shelf = shelf,
                     onPoster = onPoster,
+                    onFocusCover = onFocusCover,
                     onSeeAll = { expanded = shelf }
                 )
             }
@@ -452,6 +511,7 @@ private fun CategoryBrowser(
 private fun CategoryShelfRow(
     shelf: CategoryShelf,
     onPoster: (String) -> Unit,
+    onFocusCover: (String?) -> Unit,
     onSeeAll: () -> Unit
 ) {
     val previewCount = 7
@@ -496,6 +556,7 @@ private fun CategoryShelfRow(
                             .width(posterW)
                             .height(posterH)
                             .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.04f)
+                            .onFocusChanged { if (it.isFocused) onFocusCover(poster.cover) }
                             .clickable { onPoster(poster.id) }
                             .focusable()
                     )
@@ -596,7 +657,8 @@ private fun SeeAllCategoryCard(
 @Composable
 private fun PosterGrid(
     items: List<Pair<String, Pair<String?, String>>>,
-    onClick: (String) -> Unit = {}
+    onClick: (String) -> Unit = {},
+    onFocusCover: (String?) -> Unit = {}
 ) {
     val cols = 7
     val rowsPerPage = 3
@@ -628,6 +690,7 @@ private fun PosterGrid(
                 cols = cols,
                 rows = rowsPerPage,
                 onClick = onClick,
+                onFocusCover = onFocusCover,
                 onFocusPage = {
                     if (focusedPage != pageIndex) {
                         focusedPage = pageIndex
@@ -647,6 +710,7 @@ private fun PosterPage(
     cols: Int,
     rows: Int,
     onClick: (String) -> Unit,
+    onFocusCover: (String?) -> Unit,
     onFocusPage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -684,7 +748,12 @@ private fun PosterPage(
                                     .fillMaxHeight()
                                     .aspectRatio(2f / 3f)
                                     .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.03f)
-                                    .onFocusChanged { if (it.isFocused) onFocusPage() }
+                                    .onFocusChanged {
+                                        if (it.isFocused) {
+                                            onFocusPage()
+                                            onFocusCover(item.second.first)
+                                        }
+                                    }
                                     .clickable { onClick(item.first) }
                                     .focusable()
                             )
