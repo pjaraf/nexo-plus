@@ -1,6 +1,8 @@
 package com.nexo.tv.ui
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
@@ -15,12 +17,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,6 +49,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private enum class UpdatePhase {
+    Prompt,
+    NeedPermission,
+    Downloading,
+    Installing,
+    Error
+}
+
 @Composable
 fun UpdateGate(enabled: Boolean = true) {
     if (!enabled) return
@@ -53,52 +65,78 @@ fun UpdateGate(enabled: Boolean = true) {
     val activity = ctx as? Activity
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
-    var info by remember { mutableStateOf<UpdateInfo?>(null) }
-    var starting by remember { mutableStateOf(false) }
+
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
+    var phase by remember { mutableStateOf(UpdatePhase.Prompt) }
+    var progress by remember { mutableIntStateOf(0) }
     var status by remember { mutableStateOf<String?>(null) }
-    /** Actualización pendiente de reanudar tras habilitar “apps desconocidas”. */
+    var busy by remember { mutableStateOf(false) }
     var pendingAfterPermission by remember { mutableStateOf<UpdateInfo?>(null) }
     val updateFocus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        info = AppUpdater.check()
+        update = AppUpdater.check()
+        phase = UpdatePhase.Prompt
     }
 
     fun runDownloadAndInstall(pending: UpdateInfo) {
-        if (starting) return
+        if (busy) return
+        val main = Handler(Looper.getMainLooper())
         scope.launch {
-            starting = true
-            info = null
+            busy = true
             pendingAfterPermission = null
-            Toast.makeText(appCtx, "Actualizando…", Toast.LENGTH_SHORT).show()
+            phase = UpdatePhase.Downloading
+            progress = 0
+            status = "Descargando actualización…"
             val file = withContext(Dispatchers.IO) {
-                AppUpdater.download(appCtx, pending) { }
+                AppUpdater.download(appCtx, pending) { pct ->
+                    main.post {
+                        if (pct < 0) {
+                            progress = 0
+                            status = "Descargando actualización…"
+                        } else {
+                            progress = pct
+                            status = "Descargando… $pct%"
+                        }
+                    }
+                }
             }
             if (file == null) {
-                Toast.makeText(appCtx, "No se pudo descargar la actualización", Toast.LENGTH_LONG).show()
-                info = pending
-                starting = false
-                status = "No se pudo descargar la actualización"
-            } else {
-                AppUpdater.install(appCtx, file)
-                starting = false
+                phase = UpdatePhase.Error
+                status = "No se pudo descargar. Revisá la conexión e intentá de nuevo."
+                busy = false
+                return@launch
             }
+            phase = UpdatePhase.Installing
+            progress = 100
+            status = "Instalando… confirmá en la siguiente pantalla"
+            try {
+                AppUpdater.install(appCtx, file)
+            } catch (t: Throwable) {
+                phase = UpdatePhase.Error
+                status = "No se pudo abrir el instalador: ${t.message ?: "error"}"
+                busy = false
+                return@launch
+            }
+            busy = false
         }
     }
 
     fun startUpdateNow(target: UpdateInfo) {
-        if (starting) return
+        if (busy) return
         if (!AppUpdater.canInstallPackages(ctx)) {
             pendingAfterPermission = target
-            status = "Activa “Instalar apps desconocidas” para NEXO"
+            phase = UpdatePhase.NeedPermission
+            status = "Activá “Instalar apps desconocidas” para NEXO y volvé. Se reanuda solo."
             Toast.makeText(
                 appCtx,
-                "Activa Instalar apps desconocidas para NEXO y vuelve",
+                "Activá Instalar apps desconocidas para NEXO",
                 Toast.LENGTH_LONG
             ).show()
             val opened = AppUpdater.openInstallPermission(activity ?: ctx)
             if (!opened) {
-                status = "No se pudo abrir la configuración. Activa instalar apps desconocidas manualmente."
+                status =
+                    "No se pudo abrir Ajustes. Buscá Instalar apps desconocidas → NEXO → Permitir."
             }
             return
         }
@@ -111,85 +149,157 @@ fun UpdateGate(enabled: Boolean = true) {
             if (event != Lifecycle.Event.ON_RESUME) return@LifecycleEventObserver
             val pending = pendingAfterPermission ?: return@LifecycleEventObserver
             if (AppUpdater.canInstallPackages(ctx)) {
-                Toast.makeText(appCtx, "Permiso listo. Actualizando…", Toast.LENGTH_SHORT).show()
+                status = "Permiso listo. Descargando…"
                 runDownloadAndInstall(pending)
+            } else {
+                phase = UpdatePhase.NeedPermission
+                status = "Todavía falta permitir Instalar apps desconocidas para NEXO."
             }
         }
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
     }
 
-    val update = info ?: return
+    val current = update ?: return
+
+    val canDismiss =
+        !current.mandatory &&
+            phase != UpdatePhase.Downloading &&
+            phase != UpdatePhase.Installing &&
+            !busy
 
     Dialog(
         onDismissRequest = {
-            if (!update.mandatory && !starting && pendingAfterPermission == null) info = null
+            if (canDismiss) {
+                pendingAfterPermission = null
+                update = null
+                phase = UpdatePhase.Prompt
+            }
         },
         properties = DialogProperties(
-            dismissOnBackPress = !update.mandatory,
+            dismissOnBackPress = canDismiss,
             dismissOnClickOutside = false,
             usePlatformDefaultWidth = false
         )
     ) {
-        LaunchedEffect(Unit) {
+        LaunchedEffect(phase) {
             runCatching { updateFocus.requestFocus() }
         }
         Column(
             Modifier
-                .width(420.dp)
+                .width(440.dp)
                 .background(Color(0xFF161616), RoundedCornerShape(16.dp))
                 .padding(24.dp)
         ) {
             Text(
-                "Actualización disponible",
+                when (phase) {
+                    UpdatePhase.NeedPermission -> "Permiso requerido"
+                    UpdatePhase.Downloading -> "Descargando"
+                    UpdatePhase.Installing -> "Instalando"
+                    UpdatePhase.Error -> "Error al actualizar"
+                    else -> "Actualización disponible"
+                },
                 color = Color(0xFFFF6A1A),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "Nueva versión ${update.versionName}",
+                "Nueva versión ${current.versionName}",
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.SemiBold
             )
-            if (update.changelog.isNotBlank()) {
+            if (current.changelog.isNotBlank() && phase == UpdatePhase.Prompt) {
                 Spacer(Modifier.height(8.dp))
-                Text(update.changelog, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+                Text(current.changelog, color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
             }
             status?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, color = Color(0xFFFF8A80), fontSize = 13.sp)
+                Spacer(Modifier.height(10.dp))
+                Text(it, color = Color(0xFFFFCC80), fontSize = 14.sp)
             }
+
+            if (phase == UpdatePhase.Downloading || phase == UpdatePhase.Installing) {
+                Spacer(Modifier.height(16.dp))
+                if (phase == UpdatePhase.Downloading && progress <= 0) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp),
+                        color = Color(0xFFDE5B17),
+                        trackColor = Color.White.copy(alpha = 0.15f)
+                    )
+                } else {
+                    LinearProgressIndicator(
+                        progress = { (progress.coerceIn(0, 100)) / 100f },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(10.dp),
+                        color = Color(0xFFDE5B17),
+                        trackColor = Color.White.copy(alpha = 0.15f)
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (phase == UpdatePhase.Downloading && progress <= 0) "Preparando…" else "$progress%",
+                    color = Color.White.copy(alpha = 0.85f),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
             Spacer(Modifier.height(18.dp))
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (!update.mandatory && !starting) {
+                if (canDismiss) {
                     TextButton(
                         onClick = {
                             pendingAfterPermission = null
-                            info = null
+                            update = null
+                            phase = UpdatePhase.Prompt
+                            status = null
                         }
                     ) {
                         Text("Después", color = Color.Gray)
                     }
                     Spacer(Modifier.width(8.dp))
                 }
-                Button(
-                    enabled = !starting,
-                    onClick = { startUpdateNow(update) },
-                    modifier = Modifier
-                        .focusRequester(updateFocus)
-                        .focusable(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDE5B17))
-                ) {
-                    Text(
-                        if (pendingAfterPermission != null) "Abrir permiso" else "Actualizar",
-                        fontWeight = FontWeight.Bold
-                    )
+                when (phase) {
+                    UpdatePhase.Downloading, UpdatePhase.Installing -> {
+                        Text(
+                            if (phase == UpdatePhase.Downloading) "Descargando…" else "Instalando…",
+                            color = Color.White.copy(alpha = 0.7f),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    else -> {
+                        Button(
+                            enabled = !busy,
+                            onClick = {
+                                if (phase == UpdatePhase.NeedPermission) {
+                                    AppUpdater.openInstallPermission(activity ?: ctx)
+                                } else {
+                                    startUpdateNow(current)
+                                }
+                            },
+                            modifier = Modifier
+                                .focusRequester(updateFocus)
+                                .focusable(),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDE5B17))
+                        ) {
+                            Text(
+                                when (phase) {
+                                    UpdatePhase.NeedPermission -> "Abrir permiso"
+                                    UpdatePhase.Error -> "Reintentar"
+                                    else -> "Actualizar"
+                                },
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }

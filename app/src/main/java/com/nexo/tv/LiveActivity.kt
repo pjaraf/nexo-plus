@@ -668,9 +668,8 @@ private fun ChannelSideBanner(
                 .background(Color(0xFF222222)),
             contentAlignment = Alignment.Center
         ) {
-            val icon = channel.streamIcon
             PosterImage(
-                url = icon,
+                url = channel.streamIcon,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier

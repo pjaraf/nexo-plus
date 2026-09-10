@@ -2,7 +2,6 @@ package com.nexo.tv.update
 
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -72,7 +71,10 @@ object AppUpdater {
                 "https://github.com/pjaraf/nexo-plus/releases/latest/download/app-release.apk"
             }
             try {
-                val req = Request.Builder().url(url).build()
+                val req = Request.Builder()
+                    .url(url)
+                    .header("Accept", "application/vnd.android.package-archive,application/octet-stream,*/*")
+                    .build()
                 Http.client.newCall(req).execute().use { res ->
                     if (!res.isSuccessful) {
                         Log.e(TAG, "download failed ${res.code}")
@@ -80,12 +82,17 @@ object AppUpdater {
                     }
                     val body = res.body ?: return@withContext null
                     val total = body.contentLength()
-                    val out = File(context.cacheDir, "nexo-update.apk")
+                    val dir = (context.getExternalFilesDir("updates")
+                        ?: File(context.filesDir, "updates")).also { it.mkdirs() }
+                    val out = File(dir, "nexo-update.apk")
+                    if (out.exists()) out.delete()
                     body.byteStream().use { input ->
                         FileOutputStream(out).use { output ->
                             val buf = ByteArray(256 * 1024)
                             var read = 0L
                             var lastPct = -1
+                            var lastIndeterminateAt = 0L
+                            onProgress(if (total > 0) 0 else -1)
                             while (true) {
                                 val n = input.read(buf)
                                 if (n <= 0) break
@@ -97,12 +104,25 @@ object AppUpdater {
                                         lastPct = pct
                                         onProgress(pct)
                                     }
+                                } else if (read - lastIndeterminateAt >= 512 * 1024) {
+                                    lastIndeterminateAt = read
+                                    onProgress(-1)
                                 }
                             }
                             output.flush()
                         }
                     }
+                    // Validar cabecera ZIP/APK (PK)
+                    val magic = out.inputStream().use { s ->
+                        ByteArray(2).also { s.read(it) }
+                    }
+                    if (magic[0] != 0x50.toByte() || magic[1] != 0x4B.toByte()) {
+                        Log.e(TAG, "download not an apk (magic=${magic.joinToString()}) size=${out.length()}")
+                        out.delete()
+                        return@withContext null
+                    }
                     onProgress(100)
+                    Log.i(TAG, "download ok size=${out.length()} path=${out.absolutePath}")
                     out
                 }
             } catch (e: Throwable) {
@@ -152,7 +172,6 @@ object AppUpdater {
 
         for (raw in candidates) {
             val intent = Intent(raw).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (!canResolve(context, intent)) continue
             try {
                 context.startActivity(intent)
                 Log.i(TAG, "opened install permission via ${intent.action}")
@@ -165,17 +184,6 @@ object AppUpdater {
         return false
     }
 
-    private fun canResolve(context: Context, intent: Intent): Boolean {
-        return try {
-            intent.resolveActivity(context.packageManager) != null ||
-                context.packageManager
-                    .queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                    .isNotEmpty()
-        } catch (_: Throwable) {
-            true // intentar de todos modos en TV boxes raros
-        }
-    }
-
     fun install(context: Context, apk: File) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
         val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -183,6 +191,21 @@ object AppUpdater {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        // Evitar que onUserLeaveHint mate el proceso mientras el instalador lee el APK.
+        com.nexo.tv.AppExit.suppressHomeExit = true
+        try {
+            val resInfo = context.packageManager.queryIntentActivities(intent, 0)
+            for (ri in resInfo) {
+                context.grantUriPermission(
+                    ri.activityInfo.packageName,
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "grantUriPermission: ${e.message}")
+        }
+        Log.i(TAG, "starting installer for ${apk.absolutePath} size=${apk.length()}")
         context.startActivity(intent)
     }
 }
