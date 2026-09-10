@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,6 +28,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -286,7 +289,11 @@ class MovieActivity : ComponentActivity() {
                 } else emptyList()
                 recommended = (byCategory + byGenre + all)
                     .distinctBy { it.id }
-                    .take(6)
+                    .sortedWith(
+                        compareByDescending<VodItem> { it.ratingValue }
+                            .thenByDescending { it.addedEpoch }
+                    )
+                    .take(24)
 
                 loading = false
             }
@@ -603,20 +610,16 @@ class MovieActivity : ComponentActivity() {
                                         .weight(1f, fill = true)
                                 ) {
                                     val gap = 10.dp
-                                    val count = recommended.size.coerceAtLeast(1)
-                                    val widthForPosters = (maxWidth - gap * (count - 1)) / count
-                                    val heightForPosters = maxHeight
-                                    val posterW = minOf(widthForPosters, heightForPosters * 2f / 3f)
+                                    val visible = 6
+                                    val widthForPosters = (maxWidth - gap * (visible - 1)) / visible
+                                    val posterW = minOf(widthForPosters, maxHeight * 2f / 3f)
                                     val posterH = posterW * 1.5f
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(
-                                            gap,
-                                            Alignment.CenterHorizontally
-                                        ),
-                                        verticalAlignment = Alignment.Top
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(gap),
+                                        contentPadding = PaddingValues(bottom = 2.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        recommended.forEach { item ->
+                                        items(recommended, key = { it.id }) { item ->
                                             var focused by remember(item.id) { mutableStateOf(false) }
                                             PosterImage(
                                                 url = item.streamIcon,

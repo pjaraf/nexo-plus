@@ -125,10 +125,33 @@ object Catalog {
     }
 
     private fun homeMovies(): List<VodItem> {
-        val movies2026 = movies.filter { it.matchesYear(2026) }
-        if (movies2026.isNotEmpty()) return movies2026
-        val firstId = movieShelves.firstOrNull()?.id
-        return if (firstId != null) movies.filter { it.categoryId == firstId } else movies
+        val popularShelf = movieShelves.firstOrNull { shelf ->
+            val n = shelf.name.lowercase()
+            listOf(
+                "popular", "top", "trending", "solicit", "visto", "recomend",
+                "destac", "mejor", "más vist", "mas vist", "hot", "favorit"
+            ).any { n.contains(it) }
+        }
+        val pool = when {
+            popularShelf != null -> {
+                val byCat = movies.filter { it.categoryId == popularShelf.id }
+                if (byCat.isNotEmpty()) byCat
+                else {
+                    val ids = popularShelf.posters.map { it.id }.toHashSet()
+                    movies.filter { it.id in ids }
+                }
+            }
+            else -> {
+                val y2026 = movies.filter { it.matchesYear(2026) }
+                if (y2026.isNotEmpty()) y2026 else movies
+            }
+        }
+        return pool
+            .sortedWith(
+                compareByDescending<VodItem> { it.ratingValue }
+                    .thenByDescending { it.addedEpoch }
+            )
+            .take(60)
     }
 
     /** Carátulas de filas de categorías (lo que se ve al navegar). */

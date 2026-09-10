@@ -114,14 +114,45 @@ fun HubScreen(onLogout: () -> Unit) {
             }
         }
     }
-    val (homeCategoryTitle, homeMovies) = remember(movies2026, firstShelf, firstCategoryMovies, movies) {
-        if (movies2026.isNotEmpty()) {
-            "Películas 2026" to movies2026
-        } else if (firstCategoryMovies.isNotEmpty()) {
-            (firstShelf?.name?.ifBlank { "Películas" } ?: "Películas") to firstCategoryMovies
-        } else {
-            "Películas" to movies
+    val popularShelf = remember(movieShelvesCached) {
+        movieShelvesCached.firstOrNull { shelf ->
+            val n = shelf.name.lowercase()
+            listOf(
+                "popular", "top", "trending", "solicit", "visto", "recomend",
+                "destac", "mejor", "más vist", "mas vist", "más pedid", "mas pedid",
+                "hot", "favorit"
+            ).any { n.contains(it) }
         }
+    }
+    val (homeCategoryTitle, homeMovies) = remember(
+        movies,
+        movieShelvesCached,
+        popularShelf,
+        movies2026,
+        firstShelf,
+        firstCategoryMovies
+    ) {
+        val pool = when {
+            popularShelf != null -> {
+                val ids = popularShelf.posters.map { it.id }.toHashSet()
+                val byCat = movies.filter { it.categoryId == popularShelf.id }
+                if (byCat.isNotEmpty()) byCat else movies.filter { it.id in ids }
+            }
+            movies2026.isNotEmpty() -> movies2026
+            firstCategoryMovies.isNotEmpty() -> firstCategoryMovies
+            else -> movies
+        }
+        val sorted = pool
+            .sortedWith(
+                compareByDescending<VodItem> { it.ratingValue }
+                    .thenByDescending { it.addedEpoch }
+            )
+            .take(60)
+        val title = when {
+            popularShelf != null -> popularShelf.name.ifBlank { "Más solicitadas" }
+            else -> "Más solicitadas"
+        }
+        title to sorted
     }
     val moviesById = remember(movies) { movies.associateBy { it.id } }
     val seriesById = remember(series) { series.associateBy { it.id } }
@@ -382,7 +413,6 @@ private fun HomePane(
             featured = movies.firstOrNull()
         }
     }
-    val bottomMovies = remember(movies) { movies.take(6) }
 
     Column(
         Modifier
@@ -428,17 +458,18 @@ private fun HomePane(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
             )
         } else {
+            // ~6 carátulas enteras a la vista; el resto al moverse a los lados.
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val gap = 12.dp
-                val count = bottomMovies.size.coerceAtLeast(1)
-                val posterW = (maxWidth - gap * (count - 1)) / count
+                val visible = 6
+                val posterW = (maxWidth - gap * (visible - 1)) / visible
                 val posterH = posterW * 1.5f
-                Row(
-                    Modifier.fillMaxWidth(),
+                LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(gap),
-                    verticalAlignment = Alignment.Bottom
+                    contentPadding = PaddingValues(vertical = 6.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    bottomMovies.forEach { m ->
+                    items(movies, key = { it.id }) { m ->
                         Poster(
                             url = m.streamIcon,
                             title = m.displayName,

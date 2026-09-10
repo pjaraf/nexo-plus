@@ -347,7 +347,11 @@ class SeriesActivity : ComponentActivity() {
                 } else emptyList()
                 recommended = (byCategory + byGenre + all)
                     .distinctBy { it.id }
-                    .take(6)
+                    .sortedWith(
+                        compareByDescending<SeriesItem> { it.ratingValue }
+                            .thenByDescending { it.addedEpoch }
+                    )
+                    .take(24)
 
                 loading = false
             }
@@ -790,20 +794,16 @@ class SeriesActivity : ComponentActivity() {
                                         .weight(1f, fill = true)
                                 ) {
                                     val gap = 10.dp
-                                    val count = recommended.size.coerceAtLeast(1)
-                                    val widthForPosters = (maxWidth - gap * (count - 1)) / count
-                                    val heightForPosters = maxHeight
-                                    val posterW = minOf(widthForPosters, heightForPosters * 2f / 3f)
+                                    val visible = 6
+                                    val widthForPosters = (maxWidth - gap * (visible - 1)) / visible
+                                    val posterW = minOf(widthForPosters, maxHeight * 2f / 3f)
                                     val posterH = posterW * 1.5f
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(
-                                            gap,
-                                            Alignment.CenterHorizontally
-                                        ),
-                                        verticalAlignment = Alignment.Top
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(gap),
+                                        contentPadding = PaddingValues(bottom = 2.dp),
+                                        modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        recommended.forEach { item ->
+                                        items(recommended, key = { it.id }) { item ->
                                             var focused by remember(item.id) { mutableStateOf(false) }
                                             PosterImage(
                                                 url = item.cover,

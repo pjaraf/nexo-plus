@@ -37,10 +37,24 @@ data class VodItem(
     @SerializedName("releasedate") val releaseDate: String? = null,
     @SerializedName("added") val added: String? = null,
     @SerializedName("category_id") val categoryId: String? = null,
-    val genre: String? = null
+    val genre: String? = null,
+    @SerializedName("num") val num: Any? = null,
+    val rating: Any? = null,
+    @SerializedName("rating_5based") val rating5based: Any? = null
 ) {
     val id: String get() = streamId?.toString()?.substringBefore(".0").orEmpty()
     val displayName: String get() = name?.trim().orEmpty()
+
+    /** Rating TMDB/web (0–10) cuando el panel lo envía. */
+    val ratingValue: Double
+        get() {
+            rating?.toString()?.replace(",", ".")?.toDoubleOrNull()?.takeIf { it > 0 }?.let { return it }
+            val five = rating5based?.toString()?.replace(",", ".")?.toDoubleOrNull()?.takeIf { it > 0 }
+            return five?.times(2.0) ?: 0.0
+        }
+
+    val addedEpoch: Long
+        get() = added?.toString()?.substringBefore(".0")?.toLongOrNull() ?: 0L
 
     fun matchesYear(target: Int): Boolean {
         val y = target.toString()
@@ -65,9 +79,22 @@ data class SeriesItem(
     val name: String = "",
     val cover: String? = null,
     @SerializedName("category_id") val categoryId: String? = null,
-    val genre: String? = null
+    val genre: String? = null,
+    @SerializedName("added") val added: String? = null,
+    val rating: Any? = null,
+    @SerializedName("rating_5based") val rating5based: Any? = null
 ) {
     val id: String get() = seriesId?.toString()?.substringBefore(".0").orEmpty()
+
+    val ratingValue: Double
+        get() {
+            rating?.toString()?.replace(",", ".")?.toDoubleOrNull()?.takeIf { it > 0 }?.let { return it }
+            val five = rating5based?.toString()?.replace(",", ".")?.toDoubleOrNull()?.takeIf { it > 0 }
+            return five?.times(2.0) ?: 0.0
+        }
+
+    val addedEpoch: Long
+        get() = added?.toString()?.substringBefore(".0")?.toLongOrNull() ?: 0L
 }
 
 data class SeriesDetailInfo(
