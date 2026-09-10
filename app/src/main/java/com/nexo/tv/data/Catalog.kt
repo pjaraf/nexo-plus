@@ -107,6 +107,7 @@ object Catalog {
         seriesShelves = emptyList()
         ready = false
         LiveBoot.clear()
+        BackdropCache.clear()
         bump()
     }
 

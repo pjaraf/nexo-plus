@@ -352,7 +352,7 @@ class MovieActivity : ComponentActivity() {
 
             val title = info?.displayTitle?.takeIf { it.isNotBlank() } ?: movieName
             val cover = info?.posterUrl?.takeIf { it.isNotBlank() } ?: movieCoverExtra
-            val backdrop = info?.backdropUrl ?: cover
+            val backdrop = info?.fanartUrl ?: info?.backdropUrl ?: cover
             val castText = info?.cast?.takeIf { it.isNotBlank() } ?: "—"
             val plotText = info?.displayPlot
                 ?: "Disfruta de esta película en alta definición."

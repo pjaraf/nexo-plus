@@ -70,6 +70,7 @@ import com.nexo.tv.LiveActivity
 import com.nexo.tv.MovieActivity
 import com.nexo.tv.SeriesActivity
 import com.nexo.tv.Session
+import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.CategoryShelf
 import com.nexo.tv.data.SeriesItem
@@ -83,6 +84,7 @@ private val PosterW = 132.dp
 private val PosterH = 188.dp
 
 private enum class Tab { HOME, TV, SERIES, MOVIES }
+private data class FanartRequest(val id: String, val series: Boolean)
 
 /** Fondo cinematográfico como en ficha de película (carátula + oscurecido). */
 @Composable
@@ -133,6 +135,7 @@ fun HubScreen(onLogout: () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var tab by remember { mutableStateOf(Tab.HOME) }
     var hubBackdropUrl by remember { mutableStateOf<String?>(null) }
+    var fanartRequest by remember { mutableStateOf<FanartRequest?>(null) }
     val catalogGen by Catalog.generationFlow.collectAsState()
     val movies = remember(catalogGen) { Catalog.movies }
     val series = remember(catalogGen) { Catalog.series }
@@ -176,6 +179,25 @@ fun HubScreen(onLogout: () -> Unit) {
     LaunchedEffect(hubResumeTick) {
         delay(200)
         runCatching { liveFocus.requestFocus() }
+    }
+
+    // Fanart horizontal (misma imagen que ficha de película), nunca la carátula.
+    LaunchedEffect(fanartRequest) {
+        val req = fanartRequest
+        if (req == null) {
+            hubBackdropUrl = null
+            return@LaunchedEffect
+        }
+        delay(90)
+        if (fanartRequest != req) return@LaunchedEffect
+        val url = if (req.series) {
+            BackdropCache.seriesFanart(req.id)
+        } else {
+            BackdropCache.movieFanart(req.id)
+        }
+        if (fanartRequest == req) {
+            hubBackdropUrl = url
+        }
     }
 
     fun openMovie(item: VodItem, resumeMs: Long = -1L) {
@@ -236,7 +258,11 @@ fun HubScreen(onLogout: () -> Unit) {
                     title = homeCategoryTitle,
                     movies = homeMovies,
                     onMovie = { openMovie(it) },
-                    onFeaturedChange = { hubBackdropUrl = it?.streamIcon }
+                    onFeaturedChange = { movie ->
+                        fanartRequest = movie?.id?.takeIf { it.isNotBlank() }?.let {
+                            FanartRequest(it, series = false)
+                        }
+                    }
                 )
                 Tab.SERIES -> Box(
                     Modifier
@@ -257,7 +283,9 @@ fun HubScreen(onLogout: () -> Unit) {
                         CategoryBrowser(
                             shelves = shelves,
                             onPoster = { id -> seriesById[id]?.let { openSeries(it) } },
-                            onFocusCover = { hubBackdropUrl = it }
+                            onFocusId = { id ->
+                                fanartRequest = FanartRequest(id, series = true)
+                            }
                         )
                     }
                 }
@@ -280,7 +308,9 @@ fun HubScreen(onLogout: () -> Unit) {
                         CategoryBrowser(
                             shelves = shelves,
                             onPoster = { id -> moviesById[id]?.let { openMovie(it) } },
-                            onFocusCover = { hubBackdropUrl = it }
+                            onFocusId = { id ->
+                                fanartRequest = FanartRequest(id, series = false)
+                            }
                         )
                     }
                 }
@@ -460,7 +490,7 @@ private fun HomePane(
 private fun CategoryBrowser(
     shelves: List<CategoryShelf>,
     onPoster: (String) -> Unit,
-    onFocusCover: (String?) -> Unit = {}
+    onFocusId: (String) -> Unit = {}
 ) {
     var expanded by remember { mutableStateOf<CategoryShelf?>(null) }
 
@@ -486,7 +516,7 @@ private fun CategoryBrowser(
             PosterGrid(
                 items = gridItems,
                 onClick = onPoster,
-                onFocusCover = onFocusCover
+                onFocusId = onFocusId
             )
         }
     } else {
@@ -499,7 +529,7 @@ private fun CategoryBrowser(
                 CategoryShelfRow(
                     shelf = shelf,
                     onPoster = onPoster,
-                    onFocusCover = onFocusCover,
+                    onFocusId = onFocusId,
                     onSeeAll = { expanded = shelf }
                 )
             }
@@ -511,7 +541,7 @@ private fun CategoryBrowser(
 private fun CategoryShelfRow(
     shelf: CategoryShelf,
     onPoster: (String) -> Unit,
-    onFocusCover: (String?) -> Unit,
+    onFocusId: (String) -> Unit,
     onSeeAll: () -> Unit
 ) {
     val previewCount = 7
@@ -556,7 +586,7 @@ private fun CategoryShelfRow(
                             .width(posterW)
                             .height(posterH)
                             .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.04f)
-                            .onFocusChanged { if (it.isFocused) onFocusCover(poster.cover) }
+                            .onFocusChanged { if (it.isFocused) onFocusId(poster.id) }
                             .clickable { onPoster(poster.id) }
                             .focusable()
                     )
@@ -658,7 +688,7 @@ private fun SeeAllCategoryCard(
 private fun PosterGrid(
     items: List<Pair<String, Pair<String?, String>>>,
     onClick: (String) -> Unit = {},
-    onFocusCover: (String?) -> Unit = {}
+    onFocusId: (String) -> Unit = {}
 ) {
     val cols = 7
     val rowsPerPage = 3
@@ -690,7 +720,7 @@ private fun PosterGrid(
                 cols = cols,
                 rows = rowsPerPage,
                 onClick = onClick,
-                onFocusCover = onFocusCover,
+                onFocusId = onFocusId,
                 onFocusPage = {
                     if (focusedPage != pageIndex) {
                         focusedPage = pageIndex
@@ -710,7 +740,7 @@ private fun PosterPage(
     cols: Int,
     rows: Int,
     onClick: (String) -> Unit,
-    onFocusCover: (String?) -> Unit,
+    onFocusId: (String) -> Unit,
     onFocusPage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -751,7 +781,7 @@ private fun PosterPage(
                                     .onFocusChanged {
                                         if (it.isFocused) {
                                             onFocusPage()
-                                            onFocusCover(item.second.first)
+                                            onFocusId(item.first)
                                         }
                                     }
                                     .clickable { onClick(item.first) }

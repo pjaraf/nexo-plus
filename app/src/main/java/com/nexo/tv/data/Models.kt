@@ -103,11 +103,17 @@ data class SeriesDetailInfo(
             return if (n != null) n.toInt().toString() else raw.take(3)
         }
     val backdropUrl: String?
+        get() = fanartUrl ?: posterUrl
+
+    /** Solo escena / fanart horizontal (sin caer a la carátula vertical). */
+    val fanartUrl: String?
         get() = when (val b = backdropPath) {
-            is List<*> -> b.firstOrNull()?.toString()?.takeIf { it.isNotBlank() }
-            is String -> b.takeIf { it.isNotBlank() }
+            is List<*> -> b.asSequence()
+                .mapNotNull { it?.toString()?.trim()?.takeIf { u -> u.startsWith("http") } }
+                .firstOrNull()
+            is String -> b.trim().takeIf { it.startsWith("http") }
             else -> null
-        } ?: posterUrl
+        }
 }
 
 data class SeriesEpisode(
