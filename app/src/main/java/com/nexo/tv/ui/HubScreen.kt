@@ -382,6 +382,7 @@ private fun HomePane(
             featured = movies.firstOrNull()
         }
     }
+    val bottomMovies = remember(movies) { movies.take(6) }
 
     Column(
         Modifier
@@ -389,46 +390,30 @@ private fun HomePane(
             .padding(start = 88.dp, end = 20.dp, top = 26.dp, bottom = 14.dp)
     ) {
         featured?.let { movie ->
-            Row(
-                Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        text = movie.displayName,
-                        color = Color.White,
-                        fontSize = 32.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(
-                        Modifier
-                            .tvFocus(shape = RoundedCornerShape(12.dp), focusedScale = 1.04f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Orange)
-                            .clickable { onMovie(movie) }
-                            .focusable()
-                            .padding(horizontal = 22.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Reproducir", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
-                    }
-                }
-                Spacer(Modifier.width(22.dp))
-                Poster(
-                    url = movie.streamIcon,
-                    title = movie.displayName,
-                    modifier = Modifier
-                        .width(PosterW)
-                        .height(PosterH)
-                        .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.04f)
+            Column(Modifier.fillMaxWidth()) {
+                Text(
+                    text = movie.displayName,
+                    color = Color.White,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(
+                    Modifier
+                        .tvFocus(shape = RoundedCornerShape(12.dp), focusedScale = 1.04f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Orange)
                         .clickable { onMovie(movie) }
                         .focusable()
-                )
+                        .padding(horizontal = 22.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = Color.White, modifier = Modifier.size(26.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Reproducir", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                }
             }
         }
 
@@ -443,22 +428,29 @@ private fun HomePane(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
             )
         } else {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(movies, key = { it.id }) { m ->
-                    Poster(
-                        url = m.streamIcon,
-                        title = m.displayName,
-                        modifier = Modifier
-                            .width(PosterW)
-                            .height(PosterH)
-                            .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.04f)
-                            .onFocusChanged { if (it.isFocused) featured = m }
-                            .clickable { onMovie(m) }
-                            .focusable()
-                    )
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val gap = 12.dp
+                val count = bottomMovies.size.coerceAtLeast(1)
+                val posterW = (maxWidth - gap * (count - 1)) / count
+                val posterH = posterW * 1.5f
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    bottomMovies.forEach { m ->
+                        Poster(
+                            url = m.streamIcon,
+                            title = m.displayName,
+                            modifier = Modifier
+                                .width(posterW)
+                                .height(posterH)
+                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.04f)
+                                .onFocusChanged { if (it.isFocused) featured = m }
+                                .clickable { onMovie(m) }
+                                .focusable()
+                        )
+                    }
                 }
             }
         }
