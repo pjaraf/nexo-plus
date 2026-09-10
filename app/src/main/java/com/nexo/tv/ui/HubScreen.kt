@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -86,18 +87,12 @@ fun HubScreen(onLogout: () -> Unit) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var tab by remember { mutableStateOf(Tab.HOME) }
-    var catalogGen by remember { mutableIntStateOf(Catalog.generation) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(120)
-            val g = Catalog.generation
-            if (g != catalogGen) catalogGen = g
-        }
-    }
+    val catalogGen by Catalog.generationFlow.collectAsState()
     val movies = remember(catalogGen) { Catalog.movies }
     val series = remember(catalogGen) { Catalog.series }
+    val movieShelvesCached = remember(catalogGen) { Catalog.movieShelves }
     val movies2026 = remember(movies) { movies.filter { it.matchesYear(2026) } }
-    val firstShelf = remember(catalogGen, movies) { Catalog.movieShelves.firstOrNull() }
+    val firstShelf = remember(movieShelvesCached) { movieShelvesCached.firstOrNull() }
     val firstCategoryMovies = remember(movies, firstShelf) {
         if (firstShelf == null) emptyList()
         else {
@@ -119,6 +114,8 @@ fun HubScreen(onLogout: () -> Unit) {
             "Películas" to movies
         }
     }
+    val moviesById = remember(movies) { movies.associateBy { it.id } }
+    val seriesById = remember(series) { series.associateBy { it.id } }
     val liveFocus = remember { FocusRequester() }
 
     // Foco por defecto en TV en vivo (OK abre canales).
@@ -212,7 +209,7 @@ fun HubScreen(onLogout: () -> Unit) {
                     } else {
                         CategoryBrowser(
                             shelves = shelves,
-                            onPoster = { id -> series.find { it.id == id }?.let { openSeries(it) } }
+                            onPoster = { id -> seriesById[id]?.let { openSeries(it) } }
                         )
                     }
                 }
@@ -234,7 +231,7 @@ fun HubScreen(onLogout: () -> Unit) {
                     } else {
                         CategoryBrowser(
                             shelves = shelves,
-                            onPoster = { id -> movies.find { it.id == id }?.let { openMovie(it) } }
+                            onPoster = { id -> moviesById[id]?.let { openMovie(it) } }
                         )
                     }
                 }
@@ -426,8 +423,11 @@ private fun CategoryBrowser(
             ) {
                 Text("Volver · ${open.name}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
             }
+            val gridItems = remember(open.id, open.posters) {
+                open.posters.map { it.id to (it.cover to it.title) }
+            }
             PosterGrid(
-                items = open.posters.map { it.id to (it.cover to it.title) },
+                items = gridItems,
                 onClick = onPoster
             )
         }

@@ -1,6 +1,7 @@
 package com.nexo.tv.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -20,14 +21,18 @@ fun PosterImage(
     val ctx = LocalContext.current
     val fallback = painterResource(R.drawable.nexo_poster_fallback)
     val trimmed = url?.trim()?.takeIf { it.isNotEmpty() }
-    val model: Any = if (trimmed != null) {
-        ImageRequest.Builder(ctx)
-            .data(trimmed)
-            .size(PosterPreloader.POSTER_W, PosterPreloader.POSTER_H)
-            .crossfade(false)
-            .build()
-    } else {
-        R.drawable.nexo_poster_fallback
+    val model: Any = remember(trimmed) {
+        if (trimmed != null) {
+            ImageRequest.Builder(ctx)
+                .data(trimmed)
+                .size(PosterPreloader.POSTER_W, PosterPreloader.POSTER_H)
+                .memoryCacheKey(trimmed)
+                .diskCacheKey(trimmed)
+                .crossfade(false)
+                .build()
+        } else {
+            R.drawable.nexo_poster_fallback
+        }
     }
     AsyncImage(
         model = model,

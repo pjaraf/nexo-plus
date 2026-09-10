@@ -162,7 +162,7 @@ fun MobileLiveScreen(
                         engine.attach(this)
                     }
                 },
-                update = { engine.attach(it) },
+                update = { },
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -401,7 +401,7 @@ fun MobileLiveScreen(
                         engine.attach(this)
                     }
                 },
-                update = { engine.attach(it) },
+                update = { },
                 modifier = Modifier.fillMaxSize()
             )
 

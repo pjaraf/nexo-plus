@@ -48,7 +48,15 @@ data class VodItem(
         if (releaseDate?.contains(y) == true) return true
         val title = displayName
         if (title.isEmpty()) return false
-        return Regex("""(?:^|[^\d])$y(?:[^\d]|$)""").containsMatchIn(title)
+        return yearRegex(target).containsMatchIn(title)
+    }
+
+    companion object {
+        private val yearRegexCache = HashMap<Int, Regex>(8)
+        private fun yearRegex(target: Int): Regex =
+            yearRegexCache.getOrPut(target) {
+                Regex("""(?:^|[^\d])$target(?:[^\d]|$)""")
+            }
     }
 }
 

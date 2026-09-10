@@ -94,7 +94,7 @@ object LiveBoot { // encoding: utf-8
                 .header("User-Agent", "IPTVSmartersPro")
                 .header("Accept", "*/*")
                 .build()
-            Http.client.newCall(req).execute().use { res ->
+            Http.mediaClient.newCall(req).execute().use { res ->
                 if (!res.isSuccessful && res.code != 206) {
                     Log.w(TAG, "warm $id -> ${res.code}")
                     return@withContext

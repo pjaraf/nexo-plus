@@ -369,8 +369,8 @@ class IjkEngine(private val context: Context) {
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", 1L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-fps", 60L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "min-frames", 2L)
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 800000L) // 0.8s
-            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 1048576L)      // 1MB
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "analyzeduration", 400000L) // 0.4s
+            p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "probesize", 393216L)        // 384KB
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "fflags", "nobuffer")
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "flush_packets", 1L)
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "max_delay", 100000L)
@@ -428,10 +428,13 @@ class IjkEngine(private val context: Context) {
             true
         }
 
-        p.setOnBufferingUpdateListener { _, percent ->
-            main.post {
-                if (released || openGen != gen || player !== p) return@post
-                onBuffering?.invoke(percent < 90)
+        // Live: no spamear main con % de buffer (MEDIA_INFO_BUFFERING_* alcanza).
+        if (vod) {
+            p.setOnBufferingUpdateListener { _, percent ->
+                main.post {
+                    if (released || openGen != gen || player !== p) return@post
+                    onBuffering?.invoke(percent < 90)
+                }
             }
         }
 

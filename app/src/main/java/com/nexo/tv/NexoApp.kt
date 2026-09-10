@@ -1,6 +1,8 @@
 package com.nexo.tv
 
+import android.app.ActivityManager
 import android.app.Application
+import android.content.Context
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -14,8 +16,14 @@ class NexoApp : Application(), ImageLoaderFactory {
         Session.init(this)
     }
 
-    /** Coil con caché grande para carátulas precargadas al entrar. */
+    /** Coil con caché equilibrada para TV Box de poca RAM y móviles. */
     override fun newImageLoader(): ImageLoader {
+        val lowRam = runCatching {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            am.isLowRamDevice || am.memoryClass <= 192
+        }.getOrDefault(false)
+        val memPercent = if (lowRam) 0.18 else 0.22
+        val diskBytes = if (lowRam) 256L * 1024L * 1024L else 512L * 1024L * 1024L
         return ImageLoader.Builder(this)
             .crossfade(false)
             .respectCacheHeaders(false)
@@ -23,16 +31,16 @@ class NexoApp : Application(), ImageLoaderFactory {
             .diskCachePolicy(CachePolicy.ENABLED)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.35)
+                    .maxSizePercent(memPercent)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("nexo_poster_cache"))
-                    .maxSizeBytes(512L * 1024L * 1024L)
+                    .maxSizeBytes(diskBytes)
                     .build()
             }
-            .okHttpClient { Http.client }
+            .okHttpClient { Http.apiClient }
             .build()
     }
 }

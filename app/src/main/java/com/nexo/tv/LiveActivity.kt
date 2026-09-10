@@ -429,7 +429,7 @@ class LiveActivity : ComponentActivity() {
                                 engine.attach(this)
                             }
                         },
-                        update = { engine.attach(it) },
+                        update = { },
                         modifier = Modifier.fillMaxSize()
                     )
 

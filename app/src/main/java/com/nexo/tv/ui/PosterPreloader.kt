@@ -31,7 +31,19 @@ object PosterPreloader {
         val clean = normalize(urls)
         if (clean.isEmpty()) return
         Log.i(TAG, "warm priority ${clean.size}")
-        warm(context.applicationContext, clean, parallelism = 16)
+        warm(context.applicationContext, clean, parallelism = 8)
+    }
+
+    /** Precarga prioritaria sin bloquear el splash / Hub. */
+    fun warmPriorityAsync(context: Context, urls: Collection<String>) {
+        val clean = normalize(urls)
+        if (clean.isEmpty()) return
+        val app = context.applicationContext
+        bgScope.launch {
+            Log.i(TAG, "warm priority async ${clean.size}")
+            warm(app, clean, parallelism = 8)
+            Log.i(TAG, "warm priority async done")
+        }
     }
 
     fun warmBackground(context: Context, urls: Collection<String>) {

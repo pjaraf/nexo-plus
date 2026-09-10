@@ -147,7 +147,7 @@ object StreamBridge {
                 reqBuilder.header("Range", rangeHeader)
             }
 
-            val built = Http.client.newCall(reqBuilder.build())
+            val built = Http.mediaClient.newCall(reqBuilder.build())
             call = built
             activeCalls[built] = mySession
             if (mySession < sessionId.get()) {
@@ -208,13 +208,19 @@ object StreamBridge {
                     writeStatus(out, status, reason, headers, if (headers.containsKey("Content-Length")) -2 else declaredLen)
                     val inputStream = body.byteStream()
                     val buf = ByteArray(64 * 1024)
+                    var sinceFlush = 0
                     while (true) {
                         if (mySession < sessionId.get()) break
                         val n = inputStream.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
-                        out.flush()
+                        sinceFlush += n
+                        if (sinceFlush >= 256 * 1024) {
+                            out.flush()
+                            sinceFlush = 0
+                        }
                     }
+                    if (sinceFlush > 0) out.flush()
                 }
             }
         } catch (e: Throwable) {
