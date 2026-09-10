@@ -82,7 +82,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
+import com.nexo.tv.ui.CinematicBackdrop
 import com.nexo.tv.ui.PosterImage
+import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.ContinueWatching
 import com.nexo.tv.data.SeriesDetailInfo
@@ -352,7 +354,7 @@ class MovieActivity : ComponentActivity() {
 
             val title = info?.displayTitle?.takeIf { it.isNotBlank() } ?: movieName
             val cover = info?.posterUrl?.takeIf { it.isNotBlank() } ?: movieCoverExtra
-            val backdrop = info?.fanartUrl ?: info?.backdropUrl ?: cover
+            val backdrop = info?.fanartUrl ?: BackdropCache.cachedMovieFanart(movieId)
             val castText = info?.cast?.takeIf { it.isNotBlank() } ?: "—"
             val plotText = info?.displayPlot
                 ?: "Disfruta de esta película en alta definición."
@@ -450,39 +452,9 @@ class MovieActivity : ComponentActivity() {
                 )
 
                 if (!fullScreen) {
-                    PosterImage(
-                        url = backdrop ?: cover,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
+                    CinematicBackdrop(
+                        url = backdrop,
                         modifier = Modifier.fillMaxSize().zIndex(0f)
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .zIndex(1f)
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        Color.Black.copy(alpha = 0.78f),
-                                        Color(0xFF0D0E15).copy(alpha = 0.88f),
-                                        Color(0xFF08090E).copy(alpha = 0.97f)
-                                    )
-                                )
-                            )
-                    )
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .zIndex(1f)
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color.Black.copy(alpha = 0.88f),
-                                        Color.Black.copy(alpha = 0.55f),
-                                        Color.Transparent
-                                    )
-                                )
-                            )
                     )
 
                     when {

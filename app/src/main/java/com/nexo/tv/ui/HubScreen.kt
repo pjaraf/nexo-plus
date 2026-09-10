@@ -65,14 +65,13 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import coil.compose.AsyncImage
-import coil.imageLoader
-import coil.request.ImageRequest
 import com.nexo.tv.AppExit
 import com.nexo.tv.LiveActivity
 import com.nexo.tv.MovieActivity
 import com.nexo.tv.SeriesActivity
 import com.nexo.tv.Session
+import com.nexo.tv.ui.CinematicBackdrop
+import com.nexo.tv.ui.warmCinematicFanart
 import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.CategoryShelf
@@ -84,77 +83,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private val Orange = Color(0xFFDE5B17)
-private val HubBg = Color(0xFF0D0E15)
 private val PosterW = 132.dp
 private val PosterH = 188.dp
 
 private enum class Tab { HOME, TV, SERIES, MOVIES }
 private data class FanartRequest(val id: String, val series: Boolean)
-
-/** Fondo cinematográfico: fanart a pantalla completa, sin logo NEXO de carga. */
-@Composable
-private fun HubCinematicBackdrop(url: String?) {
-    val ctx = LocalContext.current
-    Box(Modifier.fillMaxSize().background(HubBg)) {
-        if (!url.isNullOrBlank()) {
-            val model = remember(url) {
-                ImageRequest.Builder(ctx)
-                    .data(url)
-                    .size(1920, 1080)
-                    .memoryCacheKey("hub-fanart:$url")
-                    .diskCacheKey("hub-fanart:$url")
-                    .crossfade(false)
-                    .build()
-            }
-            AsyncImage(
-                model = model,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                // Sin placeholder: evita el flash del logo NEXO
-                modifier = Modifier.fillMaxSize().zIndex(0f)
-            )
-            // Oscurecido suave para leer texto, dejando ver bien la escena
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(1f)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.28f),
-                                Color.Black.copy(alpha = 0.38f),
-                                Color.Black.copy(alpha = 0.55f)
-                            )
-                        )
-                    )
-            )
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .zIndex(1f)
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color.Black.copy(alpha = 0.42f),
-                                Color.Black.copy(alpha = 0.18f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-        }
-    }
-}
-
-private fun warmHubFanart(context: android.content.Context, url: String) {
-    val req = ImageRequest.Builder(context)
-        .data(url)
-        .size(1920, 1080)
-        .memoryCacheKey("hub-fanart:$url")
-        .diskCacheKey("hub-fanart:$url")
-        .build()
-    context.imageLoader.enqueue(req)
-}
 
 @Composable
 fun HubScreen(onLogout: () -> Unit) {
@@ -218,7 +151,7 @@ fun HubScreen(onLogout: () -> Unit) {
         }
         if (cached != null) {
             hubBackdropUrl = cached
-            warmHubFanart(ctx, cached)
+            warmCinematicFanart(ctx, cached)
         }
         val url = if (req.series) {
             BackdropCache.seriesFanart(req.id)
@@ -227,7 +160,7 @@ fun HubScreen(onLogout: () -> Unit) {
         }
         if (fanartRequest == req && url != null) {
             hubBackdropUrl = url
-            warmHubFanart(ctx, url)
+            warmCinematicFanart(ctx, url)
         }
     }
 
@@ -237,7 +170,7 @@ fun HubScreen(onLogout: () -> Unit) {
             launch(Dispatchers.IO) {
                 val url = BackdropCache.movieFanart(m.id) ?: return@launch
                 withContext(Dispatchers.Main.immediate) {
-                    warmHubFanart(ctx, url)
+                    warmCinematicFanart(ctx, url)
                 }
             }
         }
@@ -293,7 +226,7 @@ fun HubScreen(onLogout: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        HubCinematicBackdrop(url = if (tab == Tab.TV) null else hubBackdropUrl)
+        CinematicBackdrop(url = if (tab == Tab.TV) null else hubBackdropUrl)
 
         Box(Modifier.fillMaxSize()) {
             when (tab) {
