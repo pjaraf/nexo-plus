@@ -8,7 +8,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Cache de fanarts (backdrop horizontal) para el Hub.
- * Nunca devuelve la carátula vertical: si no hay escena, null.
+ * Nunca devuelve la caratula vertical: si no hay escena, null.
  */
 object BackdropCache {
     private val movieFanart = ConcurrentHashMap<String, String>()
@@ -17,6 +17,18 @@ object BackdropCache {
     private val seriesMiss = ConcurrentHashMap.newKeySet<String>()
     private val movieLocks = ConcurrentHashMap<String, Mutex>()
     private val seriesLocks = ConcurrentHashMap<String, Mutex>()
+
+    fun cachedMovieFanart(vodId: String): String? {
+        val key = vodId.substringBefore(".0").trim()
+        if (key.isBlank()) return null
+        return movieFanart[key]
+    }
+
+    fun cachedSeriesFanart(seriesId: String): String? {
+        val key = seriesId.substringBefore(".0").trim()
+        if (key.isBlank()) return null
+        return seriesFanart[key]
+    }
 
     suspend fun movieFanart(vodId: String): String? = withContext(Dispatchers.IO) {
         val key = vodId.substringBefore(".0").trim()

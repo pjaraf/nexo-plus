@@ -65,6 +65,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.nexo.tv.AppExit
 import com.nexo.tv.LiveActivity
 import com.nexo.tv.MovieActivity
@@ -75,8 +78,10 @@ import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.CategoryShelf
 import com.nexo.tv.data.SeriesItem
 import com.nexo.tv.data.VodItem
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val Orange = Color(0xFFDE5B17)
 private val HubBg = Color(0xFF0D0E15)
@@ -86,17 +91,29 @@ private val PosterH = 188.dp
 private enum class Tab { HOME, TV, SERIES, MOVIES }
 private data class FanartRequest(val id: String, val series: Boolean)
 
-/** Fondo cinematográfico como en ficha de película (carátula + oscurecido). */
+/** Fondo cinematográfico: fanart a pantalla completa, sin logo NEXO de carga. */
 @Composable
 private fun HubCinematicBackdrop(url: String?) {
+    val ctx = LocalContext.current
     Box(Modifier.fillMaxSize().background(HubBg)) {
         if (!url.isNullOrBlank()) {
-            PosterImage(
-                url = url,
+            val model = remember(url) {
+                ImageRequest.Builder(ctx)
+                    .data(url)
+                    .size(1920, 1080)
+                    .memoryCacheKey("hub-fanart:$url")
+                    .diskCacheKey("hub-fanart:$url")
+                    .crossfade(false)
+                    .build()
+            }
+            AsyncImage(
+                model = model,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                // Sin placeholder: evita el flash del logo NEXO
                 modifier = Modifier.fillMaxSize().zIndex(0f)
             )
+            // Oscurecido suave para leer texto, dejando ver bien la escena
             Box(
                 Modifier
                     .fillMaxSize()
@@ -104,9 +121,9 @@ private fun HubCinematicBackdrop(url: String?) {
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                Color.Black.copy(alpha = 0.78f),
-                                HubBg.copy(alpha = 0.88f),
-                                Color(0xFF08090E).copy(alpha = 0.97f)
+                                Color.Black.copy(alpha = 0.28f),
+                                Color.Black.copy(alpha = 0.38f),
+                                Color.Black.copy(alpha = 0.55f)
                             )
                         )
                     )
@@ -118,8 +135,8 @@ private fun HubCinematicBackdrop(url: String?) {
                     .background(
                         Brush.horizontalGradient(
                             listOf(
-                                Color.Black.copy(alpha = 0.88f),
-                                Color.Black.copy(alpha = 0.55f),
+                                Color.Black.copy(alpha = 0.42f),
+                                Color.Black.copy(alpha = 0.18f),
                                 Color.Transparent
                             )
                         )
@@ -127,6 +144,16 @@ private fun HubCinematicBackdrop(url: String?) {
             )
         }
     }
+}
+
+private fun warmHubFanart(context: android.content.Context, url: String) {
+    val req = ImageRequest.Builder(context)
+        .data(url)
+        .size(1920, 1080)
+        .memoryCacheKey("hub-fanart:$url")
+        .diskCacheKey("hub-fanart:$url")
+        .build()
+    context.imageLoader.enqueue(req)
 }
 
 @Composable
@@ -181,22 +208,38 @@ fun HubScreen(onLogout: () -> Unit) {
         runCatching { liveFocus.requestFocus() }
     }
 
-    // Fanart horizontal (misma imagen que ficha de película), nunca la carátula.
+    // Fanart: mantener la escena anterior hasta que llegue la nueva (sin flash NEXO).
     LaunchedEffect(fanartRequest) {
-        val req = fanartRequest
-        if (req == null) {
-            hubBackdropUrl = null
-            return@LaunchedEffect
+        val req = fanartRequest ?: return@LaunchedEffect
+        val cached = if (req.series) {
+            BackdropCache.cachedSeriesFanart(req.id)
+        } else {
+            BackdropCache.cachedMovieFanart(req.id)
         }
-        delay(90)
-        if (fanartRequest != req) return@LaunchedEffect
+        if (cached != null) {
+            hubBackdropUrl = cached
+            warmHubFanart(ctx, cached)
+        }
         val url = if (req.series) {
             BackdropCache.seriesFanart(req.id)
         } else {
             BackdropCache.movieFanart(req.id)
         }
-        if (fanartRequest == req) {
+        if (fanartRequest == req && url != null) {
             hubBackdropUrl = url
+            warmHubFanart(ctx, url)
+        }
+    }
+
+    // Precargar fanarts de la fila del home para cambio instantáneo
+    LaunchedEffect(homeMovies) {
+        homeMovies.take(28).forEach { m ->
+            launch(Dispatchers.IO) {
+                val url = BackdropCache.movieFanart(m.id) ?: return@launch
+                withContext(Dispatchers.Main.immediate) {
+                    warmHubFanart(ctx, url)
+                }
+            }
         }
     }
 
@@ -259,8 +302,12 @@ fun HubScreen(onLogout: () -> Unit) {
                     movies = homeMovies,
                     onMovie = { openMovie(it) },
                     onFeaturedChange = { movie ->
-                        fanartRequest = movie?.id?.takeIf { it.isNotBlank() }?.let {
-                            FanartRequest(it, series = false)
+                        val id = movie?.id?.takeIf { it.isNotBlank() }
+                        if (id == null) {
+                            fanartRequest = null
+                        } else {
+                            BackdropCache.cachedMovieFanart(id)?.let { hubBackdropUrl = it }
+                            fanartRequest = FanartRequest(id, series = false)
                         }
                     }
                 )
@@ -284,6 +331,7 @@ fun HubScreen(onLogout: () -> Unit) {
                             shelves = shelves,
                             onPoster = { id -> seriesById[id]?.let { openSeries(it) } },
                             onFocusId = { id ->
+                                BackdropCache.cachedSeriesFanart(id)?.let { hubBackdropUrl = it }
                                 fanartRequest = FanartRequest(id, series = true)
                             }
                         )
@@ -309,6 +357,7 @@ fun HubScreen(onLogout: () -> Unit) {
                             shelves = shelves,
                             onPoster = { id -> moviesById[id]?.let { openMovie(it) } },
                             onFocusId = { id ->
+                                BackdropCache.cachedMovieFanart(id)?.let { hubBackdropUrl = it }
                                 fanartRequest = FanartRequest(id, series = false)
                             }
                         )
@@ -406,9 +455,6 @@ private fun HomePane(
             .fillMaxSize()
             .padding(start = 88.dp, end = 20.dp, top = 26.dp, bottom = 14.dp)
     ) {
-        Text("NEXO", color = Orange, fontSize = 32.sp, fontWeight = FontWeight.Black)
-        Spacer(Modifier.height(18.dp))
-
         featured?.let { movie ->
             Row(
                 Modifier.fillMaxWidth(),
@@ -418,7 +464,7 @@ private fun HomePane(
                     Text(
                         text = movie.displayName,
                         color = Color.White,
-                        fontSize = 28.sp,
+                        fontSize = 32.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
