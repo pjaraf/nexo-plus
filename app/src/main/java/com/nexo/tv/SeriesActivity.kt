@@ -16,12 +16,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -70,8 +69,6 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -350,7 +347,7 @@ class SeriesActivity : ComponentActivity() {
                 } else emptyList()
                 recommended = (byCategory + byGenre + all)
                     .distinctBy { it.id }
-                    .take(14)
+                    .take(6)
 
                 loading = false
             }
@@ -551,11 +548,9 @@ class SeriesActivity : ComponentActivity() {
                                 .zIndex(2f)
                                 .padding(horizontal = 22.dp, vertical = 10.dp)
                         ) {
-                            // Carátula esquina izq. arriba | info | mini player 16:9
+                            // Carátula izq. + info (sin mini player)
                             Row(
-                                Modifier
-                                    .weight(1.05f, fill = true)
-                                    .fillMaxWidth(),
+                                Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.Top
                             ) {
@@ -571,9 +566,7 @@ class SeriesActivity : ComponentActivity() {
                                 )
 
                                 Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
+                                    Modifier.weight(1f),
                                     verticalArrangement = Arrangement.Top
                                 ) {
                                     Row(
@@ -670,22 +663,6 @@ class SeriesActivity : ComponentActivity() {
                                         }
                                     }
                                 }
-
-                                // Mini player 16:9 (sin estirar)
-                                Box(
-                                    Modifier
-                                        .width(360.dp)
-                                        .aspectRatio(16f / 9f)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color.Black)
-                                        .onGloballyPositioned { coords ->
-                                            val pos = coords.positionInRoot()
-                                            slotX = pos.x.roundToInt()
-                                            slotY = pos.y.roundToInt()
-                                            slotW = coords.size.width
-                                            slotH = coords.size.height
-                                        }
-                                )
                             }
 
                             Spacer(Modifier.height(8.dp))
@@ -807,32 +784,48 @@ class SeriesActivity : ComponentActivity() {
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(Modifier.height(6.dp))
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    contentPadding = PaddingValues(bottom = 2.dp)
+                                BoxWithConstraints(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f, fill = true)
                                 ) {
-                                    items(recommended, key = { it.id }) { item ->
-                                        var focused by remember { mutableStateOf(false) }
-                                        PosterImage(
-                                            url = item.cover,
-                                            contentDescription = item.name,
-                                            contentScale = ContentScale.Crop,
-                                            modifier = Modifier
-                                                .width(108.dp)
-                                                .height(156.dp)
-                                                .onFocusChanged { focused = it.isFocused }
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .border(
-                                                    BorderStroke(
-                                                        if (focused) 2.dp else 0.dp,
-                                                        if (focused) SeriesBlue else Color.Transparent
-                                                    ),
-                                                    RoundedCornerShape(8.dp)
-                                                )
-                                                .background(Color(0xFF222222))
-                                                .clickable { openRelated(item) }
-                                                .focusable()
-                                        )
+                                    val gap = 10.dp
+                                    val count = recommended.size.coerceAtLeast(1)
+                                    val widthForPosters = (maxWidth - gap * (count - 1)) / count
+                                    val heightForPosters = maxHeight
+                                    val posterW = minOf(widthForPosters, heightForPosters * 2f / 3f)
+                                    val posterH = posterW * 1.5f
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(
+                                            gap,
+                                            Alignment.CenterHorizontally
+                                        ),
+                                        verticalAlignment = Alignment.Top
+                                    ) {
+                                        recommended.forEach { item ->
+                                            var focused by remember(item.id) { mutableStateOf(false) }
+                                            PosterImage(
+                                                url = item.cover,
+                                                contentDescription = item.name,
+                                                contentScale = ContentScale.Crop,
+                                                modifier = Modifier
+                                                    .width(posterW)
+                                                    .height(posterH)
+                                                    .onFocusChanged { focused = it.isFocused }
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .border(
+                                                        BorderStroke(
+                                                            if (focused) 2.dp else 0.dp,
+                                                            if (focused) SeriesBlue else Color.Transparent
+                                                        ),
+                                                        RoundedCornerShape(8.dp)
+                                                    )
+                                                    .background(Color(0xFF222222))
+                                                    .clickable { openRelated(item) }
+                                                    .focusable()
+                                            )
+                                        }
                                     }
                                 }
                             }
