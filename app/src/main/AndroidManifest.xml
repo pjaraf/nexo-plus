@@ -46,7 +46,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Reproductor IjkPlayer aislado en su propio proceso para máxima estabilidad -->
+        <!-- Reproductor VLC aislado en su propio proceso para máxima estabilidad -->
         <activity
             android:name=".LiveActivity"
             android:exported="false"

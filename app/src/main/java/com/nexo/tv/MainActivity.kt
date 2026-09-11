@@ -17,12 +17,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.XtreamClient
+import com.nexo.tv.ui.Device
 import com.nexo.tv.ui.HubScreen
 import com.nexo.tv.ui.LoginScreen
 import com.nexo.tv.ui.SplashScreen
 import com.nexo.tv.ui.UpdateGate
+import com.nexo.tv.AppExit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.content.Intent
 
 private enum class AppScreen { Loading, Login, Hub }
 
@@ -32,11 +35,21 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         keepAwakeWhileVisible()
 
+        val forceLogin = intent.getBooleanExtra(EXTRA_FORCE_LOGIN, false)
+        if (forceLogin) {
+            Catalog.clear()
+            Session.logout()
+        }
+
         val bootUser = intent.getStringExtra("user")
         val bootPass = intent.getStringExtra("pass")
         val bootServer = intent.getStringExtra("server")
-        val hasBoot = !bootUser.isNullOrBlank() && !bootPass.isNullOrBlank()
-        val start = if (hasBoot || Session.isLoggedIn) AppScreen.Loading else AppScreen.Login
+        val hasBoot = !forceLogin && !bootUser.isNullOrBlank() && !bootPass.isNullOrBlank()
+        val start = if (!forceLogin && (hasBoot || Session.isLoggedIn)) {
+            AppScreen.Loading
+        } else {
+            AppScreen.Login
+        }
 
         setContent {
             var screen by remember { mutableStateOf(start) }
@@ -64,11 +77,24 @@ class MainActivity : ComponentActivity() {
                     screen = AppScreen.Login
                     return@LaunchedEffect
                 }
-                // Logo solo mientras se precargan datos + carátulas visibles
-                withContext(Dispatchers.IO) {
-                    runCatching { Catalog.preload(this@MainActivity) }
+                // Telefono / tablet: abrir TV al instante (catalogo se precarga en background).
+                // TV Box: esperar catalogo antes del Hub.
+                if (!Device.isTv(this@MainActivity)) {
+                    Catalog.preloadAsync(this@MainActivity)
+                    AppExit.suppressHomeExit = true
+                    startActivity(
+                        Intent(this@MainActivity, LiveActivity::class.java)
+                            .putExtra(LiveActivity.EXTRA_USER, Session.username)
+                            .putExtra(LiveActivity.EXTRA_PASS, Session.password)
+                            .putExtra(LiveActivity.EXTRA_SERVER, Session.server)
+                    )
+                    finish()
+                } else {
+                    withContext(Dispatchers.IO) {
+                        runCatching { Catalog.preload(this@MainActivity) }
+                    }
+                    screen = AppScreen.Hub
                 }
-                screen = AppScreen.Hub
             }
 
             BackHandler(enabled = screen == AppScreen.Hub || screen == AppScreen.Login) {
@@ -116,5 +142,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AppExit.suppressHomeExit = false
+    }
+
+    companion object {
+        const val EXTRA_FORCE_LOGIN = "force_login"
     }
 }

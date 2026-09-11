@@ -2,11 +2,17 @@ package com.nexo.tv.data
 
 import android.content.Context
 import com.nexo.tv.ui.PosterPreloader
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 data class CategoryShelf(
     val id: String,
@@ -46,6 +52,9 @@ object Catalog {
     private val _generation = MutableStateFlow(0)
     val generationFlow: StateFlow<Int> = _generation.asStateFlow()
 
+    private val preloadLock = Mutex()
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     private fun bump() {
         generation++
         _generation.value = generation
@@ -66,35 +75,56 @@ object Catalog {
         )
     }
 
+    /** Precarga en segundo plano (sobrevive al finish de MainActivity). */
+    fun preloadAsync(context: Context) {
+        val app = context.applicationContext
+        bgScope.launch {
+            runCatching { preload(app) }
+                .onFailure { android.util.Log.w("Catalog", "preloadAsync fail: ${it.message}") }
+        }
+    }
+
     /**
-     * Carga catálogo lo antes posible para abrir el Hub; carátulas y live warm
-     * siguen en segundo plano (misma UX, splash más corto).
+     * Carga catálogo + arranca warm de carátulas.
+     * Seguro ante llamadas concurrentes (mutex).
      */
-    suspend fun preload(context: Context) = coroutineScope {
-        val moviesJob = async { runCatching { XtreamClient.movies() }.getOrDefault(emptyList()) }
-        val seriesJob = async { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
-        val movieCatsJob = async { runCatching { XtreamClient.vodCategories() }.getOrDefault(emptyList()) }
-        val seriesCatsJob = async { runCatching { XtreamClient.seriesCategories() }.getOrDefault(emptyList()) }
-        // TV en vivo en paralelo; no bloquea la apertura del Hub
-        async { runCatching { LiveBoot.preload(context) } }
+    suspend fun preload(context: Context) = preloadLock.withLock {
+        val app = context.applicationContext
+        if (ready && movies.isNotEmpty() && series.isNotEmpty()) {
+            // Ya en memoria de este proceso: solo refrescar carátulas en Coil.
+            warmCovers(app)
+            return@withLock
+        }
+        coroutineScope {
+            val moviesJob = async { runCatching { XtreamClient.movies() }.getOrDefault(emptyList()) }
+            val seriesJob = async { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
+            val movieCatsJob = async { runCatching { XtreamClient.vodCategories() }.getOrDefault(emptyList()) }
+            val seriesCatsJob = async { runCatching { XtreamClient.seriesCategories() }.getOrDefault(emptyList()) }
+            // TV en vivo en paralelo; no bloquea
+            async { runCatching { LiveBoot.preload(app) } }
 
-        movies = moviesJob.await()
-        series = seriesJob.await()
-        movieCategories = movieCatsJob.await()
-        seriesCategories = seriesCatsJob.await()
-        rebuildShelves()
-        ready = true
-        bump()
-        android.util.Log.i(
-            "Catalog",
-            "ready movies=${movies.size} series=${series.size} " +
-                "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
-        )
+            movies = moviesJob.await()
+            series = seriesJob.await()
+            movieCategories = movieCatsJob.await()
+            seriesCategories = seriesCatsJob.await()
+            rebuildShelves()
+            ready = true
+            bump()
+            android.util.Log.i(
+                "Catalog",
+                "ready movies=${movies.size} series=${series.size} " +
+                    "movieCats=${movieCategories.size} seriesCats=${seriesCategories.size}"
+            )
+            warmCovers(app)
+        }
+    }
 
+    private fun warmCovers(context: Context) {
         val firstScreen = firstScreenCoverUrls()
-        PosterPreloader.warmPriorityAsync(context, firstScreen)
-        val firstSet = firstScreen.toHashSet()
-        val rest = browseCoverUrls().filterNot { it in firstSet }
+        val mobileGrid = mobileGridCoverUrls()
+        PosterPreloader.warmPriorityAsync(context, firstScreen + mobileGrid.take(120))
+        val firstSet = (firstScreen + mobileGrid.take(120)).toHashSet()
+        val rest = (browseCoverUrls() + mobileGrid).filterNot { it in firstSet }
         PosterPreloader.warmBackground(context, rest)
     }
 
@@ -121,6 +151,14 @@ object Catalog {
         seriesShelves.take(2).forEach { shelf ->
             shelf.posters.take(8).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
         }
+        return out.toList()
+    }
+
+    /** Primeras carátulas del grid móvil Películas/Series. */
+    private fun mobileGridCoverUrls(): List<String> {
+        val out = LinkedHashSet<String>()
+        movies.take(120).mapNotNull { cleanUrl(it.streamIcon) }.forEach { out += it }
+        series.take(120).mapNotNull { cleanUrl(it.cover) }.forEach { out += it }
         return out.toList()
     }
 

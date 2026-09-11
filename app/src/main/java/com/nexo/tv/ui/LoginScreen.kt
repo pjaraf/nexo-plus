@@ -94,7 +94,7 @@ fun LoginScreen(onSuccess: () -> Unit) {
         busy = true
         error = null
         scope.launch {
-            // Servidor configurado: https://nexo.fusionx.cl
+            // Servidor: http://eliteplusec.com:8080
             val ok = XtreamClient.login(
                 user.trim(),
                 pass,

@@ -1,6 +1,7 @@
 package com.nexo.tv
 
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.KeyEvent as AndroidKeyEvent
 import android.view.ViewGroup
@@ -43,6 +44,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -68,17 +70,22 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.LiveBoot
 import com.nexo.tv.data.LiveCategory
 import com.nexo.tv.data.LiveChannel
 import com.nexo.tv.data.XtreamClient
-import com.nexo.tv.player.IjkEngine
-import com.nexo.tv.player.IjkVideoLayout
+import android.content.Intent
+import com.nexo.tv.player.VlcEngine
+import com.nexo.tv.player.VlcVideoLayout
 import com.nexo.tv.player.StreamBridge
 import com.nexo.tv.ui.ChannelMaintenanceOverlay
 import com.nexo.tv.ui.Device
 import com.nexo.tv.ui.MobileLiveScreen
 import com.nexo.tv.ui.PosterImage
+import com.nexo.tv.ui.applyPhoneTabletCleanSystemBars
+import com.nexo.tv.ui.setPhoneTabletPlayerFullscreen
+import com.nexo.tv.ui.playerImmersiveRequested
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -91,11 +98,16 @@ class LiveActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         keepAwakeWhileVisible()
+        if (!Device.isTv(this)) {
+            applyPhoneTabletCleanSystemBars()
+            // Catalogo + caratulas en :player mientras se usa TV en vivo.
+            Catalog.preloadAsync(this)
+        }
         intent.getStringExtra(EXTRA_USER)?.let { Session.username = it }
         intent.getStringExtra(EXTRA_PASS)?.let { Session.password = it }
         intent.getStringExtra(EXTRA_SERVER)?.let { if (it.isNotBlank()) Session.server = it }
         StreamBridge.start()
-        val engine = IjkEngine(this)
+        val engine = VlcEngine(this)
         val prefs = getSharedPreferences(LiveBoot.PREFS, Context.MODE_PRIVATE)
 
         fun persistWatching(ch: LiveChannel) {
@@ -147,8 +159,11 @@ class LiveActivity : ComponentActivity() {
                     maintenance = false
                 }
                 engine.onError = {
-                    hasVideoFrame = false
-                    maintenance = true
+                    // Solo mantenimiento si sigue sin video real (no por matar canal al zapear).
+                    if (!engine.isPlaying) {
+                        hasVideoFrame = false
+                        maintenance = true
+                    }
                 }
                 engine.onBuffering = { buffering ->
                     if (!buffering && engine.isPlaying) {
@@ -166,7 +181,7 @@ class LiveActivity : ComponentActivity() {
 
             fun playChannel(ch: LiveChannel, instant: Boolean = true) {
                 persistWatching(ch)
-                hasVideoFrame = false
+                // No bajar hasVideoFrame: mantiene el ultimo frame y evita salir / flash de mantenimiento.
                 maintenance = false
                 playGen++
                 val remote = XtreamClient.liveUrl(ch.id)
@@ -232,11 +247,11 @@ class LiveActivity : ComponentActivity() {
                 showBanner = false
             }
 
-            // Si no hay video en ~8s, mostrar mantenimiento automaticamente
+            // Si no hay video en ~12s, mostrar mantenimiento (margeniente al zapear rapido)
             LaunchedEffect(playGen) {
                 if (playGen == 0) return@LaunchedEffect
-                delay(8000)
-                if (!hasVideoFrame) {
+                delay(12_000)
+                if (!hasVideoFrame && !engine.isPlaying) {
                     maintenance = true
                 }
             }
@@ -362,12 +377,25 @@ class LiveActivity : ComponentActivity() {
                     loading = loading,
                     favorites = favorites,
                     onToggleFavorite = { toggleFavorite(it) },
-                    onHomeClick = {
-                        current?.let { persistWatching(it) }
+                    onLogout = {
+                        // Telefono: cerrar sesion y volver al login (no matar todo el proceso).
+                        // Live esta en :player; hay que forzar login en el proceso principal.
+                        runCatching { engine.release() }
+                        Catalog.clear()
+                        Session.logout()
+                        AppExit.suppressHomeExit = true
+                        startActivity(
+                            Intent(this@LiveActivity, MainActivity::class.java)
+                                .addFlags(
+                                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                                        Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                )
+                                .putExtra(MainActivity.EXTRA_FORCE_LOGIN, true)
+                        )
                         finish()
                     },
-                    onLogout = {
-                        exitNexoCompletely()
+                    onResumeLive = {
+                        current?.let { playChannel(it, instant = true) }
                     }
                 )
             } else {
@@ -418,7 +446,7 @@ class LiveActivity : ComponentActivity() {
                 ) {
                     AndroidView(
                         factory = { ctx ->
-                            IjkVideoLayout(ctx).apply {
+                            VlcVideoLayout(ctx).apply {
                                 layoutParams = FrameLayout.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT
@@ -542,6 +570,23 @@ class LiveActivity : ComponentActivity() {
         super.onUserLeaveHint()
         if (Device.isTv(this)) {
             exitNexoCompletely()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !Device.isTv(this)) {
+            val immersive = playerImmersiveRequested ||
+                requestedOrientation == ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            if (immersive) setPhoneTabletPlayerFullscreen(true)
+            else applyPhoneTabletCleanSystemBars()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!Device.isTv(this) && playerImmersiveRequested) {
+            setPhoneTabletPlayerFullscreen(true)
         }
     }
 

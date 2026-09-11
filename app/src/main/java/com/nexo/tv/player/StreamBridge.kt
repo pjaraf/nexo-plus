@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Puente ultra rápido local para flujos HTTPS.
- * OkHttp maneja TLS 1.3 certificado y entrega el flujo a IjkPlayer por 127.0.0.1 con tcpNoDelay.
+ * OkHttp maneja TLS 1.3 certificado y entrega el flujo a VLC por 127.0.0.1 con tcpNoDelay.
  *
  * Al cambiar de canal, [beginLiveSession] mata al instante todas las descargas y sockets
  * de sesiones anteriores para liberar ancho de banda de inmediato.

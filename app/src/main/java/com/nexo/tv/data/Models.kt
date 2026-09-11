@@ -4,8 +4,15 @@ import com.google.gson.annotations.SerializedName
 
 data class UserInfo(
     val username: String? = null,
+    val password: String? = null,
+    val message: String? = null,
+    val auth: Any? = null,
     val status: String? = null,
-    val auth: Any? = null
+    @SerializedName("exp_date") val expDate: Any? = null,
+    @SerializedName("is_trial") val isTrial: Any? = null,
+    @SerializedName("active_cons") val activeCons: Any? = null,
+    @SerializedName("created_at") val createdAt: Any? = null,
+    @SerializedName("max_connections") val maxConnections: Any? = null,
 )
 
 data class LoginResponse(

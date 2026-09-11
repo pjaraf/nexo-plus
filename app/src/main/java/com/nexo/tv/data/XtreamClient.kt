@@ -11,9 +11,7 @@ object XtreamClient {
     private const val UA =
         "Mozilla/5.0 (Linux; Android 10; TV) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 VLC/3.0.18"
 
-    private val hosts = listOf(
-        Session.SERVER
-    )
+    private val hosts = Session.HOSTS
 
     private val gson = Gson()
 
@@ -49,19 +47,60 @@ object XtreamClient {
         }
     }
 
+    /** auth puede venir como 0, 0.0, "0", false, etc. */
+    private fun isAuthOk(auth: Any?): Boolean {
+        when (auth) {
+            null -> return false
+            is Boolean -> return auth
+            is Number -> return auth.toDouble() != 0.0
+            else -> {
+                val s = auth.toString().trim()
+                if (s.isEmpty()) return false
+                if (s.equals("false", true) || s == "0" || s == "0.0") return false
+                if (s.equals("true", true)) return true
+                val n = s.toDoubleOrNull()
+                return if (n != null) n != 0.0 else true
+            }
+        }
+    }
+
+    private fun isLoginPayloadOk(json: String): Boolean {
+        val res = runCatching { gson.fromJson(json, LoginResponse::class.java) }.getOrNull()
+        val info = res?.userInfo ?: return false
+        if (!isAuthOk(info.auth)) return false
+        val status = info.status?.trim().orEmpty()
+        if (status.equals("Disabled", true) ||
+            status.equals("Banned", true) ||
+            status.equals("Expired", true)
+        ) {
+            return false
+        }
+        return true
+    }
+
+    private fun parseUserInfo(json: String): UserInfo? =
+        runCatching { gson.fromJson(json, LoginResponse::class.java)?.userInfo }.getOrNull()
+
+    private fun hostOrder(preferred: String?): List<String> {
+        val first = preferred?.trim()?.trimEnd('/')?.takeIf { it.isNotBlank() }
+        return (listOfNotNull(first) + hosts.map { it.trimEnd('/') }).distinct()
+    }
+
     private suspend fun fetch(action: String? = null, extra: Map<String, String> = emptyMap()): String? =
         withContext(Dispatchers.IO) {
             val u = Session.username
             val p = Session.password
             if (u.isBlank() || p.isBlank()) return@withContext null
             val preferred = Session.server
-            val order = (listOf(preferred) + hosts).distinct()
-            for (base in order) {
-                val body = tryGet(apiUrl(base, action, extra, u, p))
-                if (!body.isNullOrBlank()) {
-                    if (base != preferred) Session.server = base
-                    return@withContext body
+            for (base in hostOrder(preferred)) {
+                val body = tryGet(apiUrl(base, action, extra, u, p)) ?: continue
+                // En login sin action: no aceptar auth fallido de un host (probar el siguiente).
+                if (action.isNullOrBlank() && !isLoginPayloadOk(body)) {
+                    android.util.Log.w("Xtream", "auth fail on $base, trying next")
+                    continue
                 }
+                if (base != preferred.trimEnd('/')) Session.server = base
+                return@withContext body
             }
             null
         }
@@ -72,32 +111,30 @@ object XtreamClient {
             val prevP = Session.password
             val prevS = Session.server
             Session.login(user, pass)
-            if (!preferredServer.isNullOrBlank()) {
-                Session.server = preferredServer
-            }
-            val json = fetch()
-            if (json.isNullOrBlank()) {
-                Session.login(prevU, prevP)
-                Session.server = prevS
-                return@withContext false
-            }
-            val res = runCatching { gson.fromJson(json, LoginResponse::class.java) }.getOrNull()
-            val info = res?.userInfo
-            val auth = info?.auth?.toString()?.trim()
-            val status = info?.status?.trim()
-            val badAuth = auth == "0" || auth.equals("false", true)
-            val badStatus = status.equals("Disabled", true) ||
-                status.equals("Banned", true) ||
-                status.equals("Expired", true)
-            if (info == null || badAuth || badStatus) {
-                Session.login(prevU, prevP)
-                Session.server = prevS
-                false
-            } else {
+            val order = hostOrder(preferredServer ?: Session.server)
+            for (base in order) {
+                val json = tryGet(apiUrl(base, null, emptyMap(), user.trim(), pass)) ?: continue
+                if (!isLoginPayloadOk(json)) {
+                    android.util.Log.w("Xtream", "login rejected by $base")
+                    continue
+                }
+                Session.server = base
+                Session.saveAccountInfo(parseUserInfo(json))
                 android.util.Log.i("Xtream", "login OK server=${Session.server} user=$user")
-                true
+                return@withContext true
             }
+            Session.login(prevU, prevP)
+            Session.server = prevS
+            false
         }
+
+    /** Actualiza user_info del cliente (perfil). No expone servidor. */
+    suspend fun refreshAccountInfo(): Boolean = withContext(Dispatchers.IO) {
+        val json = fetch(action = null) ?: return@withContext false
+        if (!isLoginPayloadOk(json)) return@withContext false
+        Session.saveAccountInfo(parseUserInfo(json))
+        true
+    }
 
     suspend fun liveCategories(): List<LiveCategory> {
         val json = fetch("get_live_categories") ?: return emptyList()

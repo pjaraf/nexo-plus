@@ -3,40 +3,32 @@ package com.nexo.tv.player
 import android.content.Context
 import android.util.AttributeSet
 import android.view.Gravity
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.widget.FrameLayout
 import kotlin.math.roundToInt
+import org.videolan.libvlc.util.VLCVideoLayout as LibVlcVideoLayout
 
 /**
- * Contenedor para SurfaceView de IjkPlayer que soporta modos de aspecto
- * (Pantalla completa, Zoom, 16:9, 4:3, Original) sin recortar ni distorsionar.
+ * Contenedor del VLCVideoLayout oficial, con modos de aspecto
+ * (Pantalla completa, Zoom, 16:9, 4:3, Original).
  */
-class IjkVideoLayout @JvmOverloads constructor(
+class VlcVideoLayout @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0
-) : FrameLayout(context, attrs, defStyleAttr), SurfaceHolder.Callback {
+) : FrameLayout(context, attrs, defStyleAttr) {
 
-    val surfaceView = SurfaceView(context).apply {
+    /** Layout nativo de libVLC (Surface/Texture interno). */
+    val vlcLayout = LibVlcVideoLayout(context).apply {
         layoutParams = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, Gravity.CENTER)
     }
 
-    private var engine: IjkEngine? = null
     private var videoWidth: Int = 0
     private var videoHeight: Int = 0
-    private var aspectMode: IjkEngine.AspectMode = IjkEngine.AspectMode.FILL
+    private var aspectMode: VlcEngine.AspectMode = VlcEngine.AspectMode.FILL
 
     init {
-        addView(surfaceView)
-        surfaceView.holder.addCallback(this)
-    }
-
-    fun bindEngine(engine: IjkEngine) {
-        this.engine = engine
-        if (surfaceView.holder.surface?.isValid == true) {
-            engine.onSurfaceCreated(surfaceView.holder)
-        }
+        setBackgroundColor(0xFF000000.toInt())
+        addView(vlcLayout)
     }
 
     fun setVideoSize(width: Int, height: Int) {
@@ -47,7 +39,7 @@ class IjkVideoLayout @JvmOverloads constructor(
         }
     }
 
-    fun setAspectMode(mode: IjkEngine.AspectMode) {
+    fun setAspectMode(mode: VlcEngine.AspectMode) {
         if (aspectMode != mode) {
             aspectMode = mode
             post { requestLayout() }
@@ -70,11 +62,11 @@ class IjkVideoLayout @JvmOverloads constructor(
         var childHeight = containerHeight
 
         when (aspectMode) {
-            IjkEngine.AspectMode.FILL -> {
+            VlcEngine.AspectMode.FILL -> {
                 childWidth = containerWidth
                 childHeight = containerHeight
             }
-            IjkEngine.AspectMode.ORIGINAL -> {
+            VlcEngine.AspectMode.ORIGINAL -> {
                 if (containerAspect > videoAspect) {
                     childWidth = (containerHeight * videoAspect).roundToInt()
                     childHeight = containerHeight
@@ -83,7 +75,7 @@ class IjkVideoLayout @JvmOverloads constructor(
                     childHeight = (containerWidth / videoAspect).roundToInt()
                 }
             }
-            IjkEngine.AspectMode.RATIO_16_9 -> {
+            VlcEngine.AspectMode.RATIO_16_9 -> {
                 val targetAspect = 16f / 9f
                 if (containerAspect > targetAspect) {
                     childWidth = (containerHeight * targetAspect).roundToInt()
@@ -93,7 +85,7 @@ class IjkVideoLayout @JvmOverloads constructor(
                     childHeight = (containerWidth / targetAspect).roundToInt()
                 }
             }
-            IjkEngine.AspectMode.RATIO_4_3 -> {
+            VlcEngine.AspectMode.RATIO_4_3 -> {
                 val targetAspect = 4f / 3f
                 if (containerAspect > targetAspect) {
                     childWidth = (containerHeight * targetAspect).roundToInt()
@@ -103,7 +95,7 @@ class IjkVideoLayout @JvmOverloads constructor(
                     childHeight = (containerWidth / targetAspect).roundToInt()
                 }
             }
-            IjkEngine.AspectMode.ZOOM -> {
+            VlcEngine.AspectMode.ZOOM -> {
                 if (containerAspect > videoAspect) {
                     childWidth = containerWidth
                     childHeight = (containerWidth / videoAspect).roundToInt()
@@ -116,20 +108,15 @@ class IjkVideoLayout @JvmOverloads constructor(
 
         val childWidthSpec = MeasureSpec.makeMeasureSpec(childWidth, MeasureSpec.EXACTLY)
         val childHeightSpec = MeasureSpec.makeMeasureSpec(childHeight, MeasureSpec.EXACTLY)
-        surfaceView.measure(childWidthSpec, childHeightSpec)
-
+        vlcLayout.measure(childWidthSpec, childHeightSpec)
         setMeasuredDimension(containerWidth, containerHeight)
     }
 
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        engine?.onSurfaceCreated(holder)
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        engine?.onSurfaceChanged(holder, width, height)
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        engine?.onSurfaceDestroyed()
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        val childW = vlcLayout.measuredWidth
+        val childH = vlcLayout.measuredHeight
+        val l = (width - childW) / 2
+        val t = (height - childH) / 2
+        vlcLayout.layout(l, t, l + childW, t + childH)
     }
 }

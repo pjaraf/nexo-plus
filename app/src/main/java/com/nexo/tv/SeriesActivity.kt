@@ -84,17 +84,24 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.nexo.tv.ui.CinematicBackdrop
+import com.nexo.tv.ui.Device
+import com.nexo.tv.ui.MobileSeriesDetailScreen
 import com.nexo.tv.ui.PagedSixPosterRow
 import com.nexo.tv.ui.PosterImage
+import com.nexo.tv.ui.PosterPreloader
+import com.nexo.tv.ui.applyPhoneTabletCleanSystemBars
+import com.nexo.tv.ui.playerImmersiveRequested
+import com.nexo.tv.ui.setPhoneTabletPlayerFullscreen
 import com.nexo.tv.ui.warmCinematicFanart
 import com.nexo.tv.data.BackdropCache
+import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.ContinueWatching
 import com.nexo.tv.data.SeriesDetailInfo
 import com.nexo.tv.data.SeriesEpisode
 import com.nexo.tv.data.SeriesItem
 import com.nexo.tv.data.XtreamClient
-import com.nexo.tv.player.IjkEngine
-import com.nexo.tv.player.IjkVideoLayout
+import com.nexo.tv.player.VlcEngine
+import com.nexo.tv.player.VlcVideoLayout
 import com.nexo.tv.player.StreamBridge
 import com.nexo.tv.ui.ResumePrompt
 import kotlinx.coroutines.delay
@@ -109,6 +116,9 @@ class SeriesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         keepAwakeWhileVisible()
+        if (!Device.isTv(this)) {
+            applyPhoneTabletCleanSystemBars()
+        }
         intent.getStringExtra(EXTRA_USER)?.let { Session.username = it }
         intent.getStringExtra(EXTRA_PASS)?.let { Session.password = it }
         intent.getStringExtra(EXTRA_SERVER)?.let { if (it.isNotBlank()) Session.server = it }
@@ -122,7 +132,7 @@ class SeriesActivity : ComponentActivity() {
         val resumeFromIntent = intent.getLongExtra(EXTRA_RESUME_MS, -1L)
 
         StreamBridge.start()
-        val engine = IjkEngine(this)
+        val engine = VlcEngine(this)
 
         setContent {
             var loading by remember { mutableStateOf(true) }
@@ -372,7 +382,8 @@ class SeriesActivity : ComponentActivity() {
                     }
                 }
 
-                val all = runCatching { XtreamClient.series() }.getOrDefault(emptyList())
+                val all = Catalog.series
+                    .ifEmpty { runCatching { XtreamClient.series() }.getOrDefault(emptyList()) }
                     .filter { it.id.isNotBlank() && it.id != seriesId }
                 val genreTokens = detail.info?.genre.orEmpty()
                     .lowercase()
@@ -396,6 +407,10 @@ class SeriesActivity : ComponentActivity() {
                             .thenByDescending { it.addedEpoch }
                     )
                     .take(24)
+                PosterPreloader.warmPriorityAsync(
+                    this@SeriesActivity,
+                    recommended.mapNotNull { it.cover?.trim()?.takeIf { u -> u.isNotEmpty() } }
+                )
 
                 loading = false
             }
@@ -483,6 +498,89 @@ class SeriesActivity : ComponentActivity() {
                 val nums = episodes.map { it.episodeNum }.filter { it > 0 }
                 if (nums.isNotEmpty()) "${nums.min()}-${nums.max()}" else "1-${episodes.size}"
             } else ""
+            val genreLine = info?.genre?.takeIf { it.isNotBlank() }.orEmpty()
+            val yearGenreLine = buildString {
+                val year = info?.displayDate.orEmpty()
+                    .takeWhile { it.isDigit() }
+                    .takeIf { it.length >= 4 }
+                    ?: Regex("""\b(19|20)\d{2}\b""").find(info?.displayDate.orEmpty())?.value.orEmpty()
+                if (year.isNotBlank()) append(year)
+                if (genreLine.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append(genreLine)
+                }
+            }
+
+            val isPhoneOrTablet = remember { !Device.isTv(this@SeriesActivity) }
+            if (isPhoneOrTablet) {
+                MobileSeriesDetailScreen(
+                    engine = engine,
+                    title = title.ifBlank { "Serie" },
+                    coverUrl = cover,
+                    yearGenreLine = yearGenreLine,
+                    plot = plotText,
+                    loading = loading,
+                    error = error,
+                    playing = playing,
+                    positionMs = position,
+                    durationMs = duration,
+                    fullScreen = fullScreen,
+                    seriesId = seriesId,
+                    seasonKeys = seasons.keys.toList(),
+                    selectedSeason = selectedSeason,
+                    episodes = episodes,
+                    selectedEpisode = selectedEpisode,
+                    episodeTag = epTag,
+                    recommended = recommended,
+                    toast = toast,
+                    nextEpisodeMsg = nextEpisodeMsg,
+                    onBack = {
+                        persistProgress()
+                        finish()
+                    },
+                    onTogglePlay = {
+                        engine.togglePause()
+                        playing = engine.isPlaying
+                    },
+                    onSeekTo = { ms ->
+                        engine.seekTo(ms)
+                        position = ms
+                    },
+                    onRequestFullscreen = { requestFullscreen() },
+                    onExitFullscreen = { fullScreen = false },
+                    onSelectSeason = { season -> selectedSeason = season },
+                    onSelectEpisode = { ep -> playEpisode(ep, expand = false) },
+                    onOpenRelated = { openRelated(it) },
+                    onClearToast = { toast = null },
+                    onSeekBy = { delta ->
+                        engine.seekBy(delta)
+                        bumpHud()
+                    },
+                    onAudio = {
+                        toast = engine.cycleAudioTrack() ?: "Sin audio"
+                        bumpHud()
+                    },
+                    onSubs = {
+                        toast = engine.cycleSubtitleTrack()
+                        bumpHud()
+                    },
+                    onAspect = {
+                        toast = engine.cycleAspectMode()
+                        bumpHud()
+                    },
+                    resumeOverlay = if (showResumePrompt) {
+                        {
+                            ResumePrompt(
+                                title = "¿Seguir viendo?",
+                                subtitle = selectedEpisode?.let { "T${it.season} · E${it.episodeNum}" },
+                                onContinue = { applyResumeChoice(continueWatching = true) },
+                                onFromStart = { applyResumeChoice(continueWatching = false) }
+                            )
+                        }
+                    } else null
+                )
+                return@setContent
+            }
 
             Box(
                 Modifier
@@ -539,10 +637,10 @@ class SeriesActivity : ComponentActivity() {
                         }
                     }
             ) {
-                // Un solo surface IjkPlayer: miniatura o pantalla completa (misma instancia)
+                // Un solo surface VLC: miniatura o pantalla completa (misma instancia)
                 AndroidView(
                     factory = { ctx ->
-                        IjkVideoLayout(ctx).apply {
+                        VlcVideoLayout(ctx).apply {
                             layoutParams = FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT
@@ -1031,6 +1129,23 @@ class SeriesActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && !Device.isTv(this)) {
+            val immersive = playerImmersiveRequested ||
+                requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            if (immersive) setPhoneTabletPlayerFullscreen(true)
+            else applyPhoneTabletCleanSystemBars()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (!Device.isTv(this) && playerImmersiveRequested) {
+            setPhoneTabletPlayerFullscreen(true)
         }
     }
 

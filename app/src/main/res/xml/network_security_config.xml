@@ -6,8 +6,7 @@
         </trust-anchors>
     </base-config>
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">nexo.fusionx.cl</domain>
-        <domain includeSubdomains="true">fusionx.cl</domain>
+        <domain includeSubdomains="true">eliteplusec.com</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
