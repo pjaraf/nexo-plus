@@ -464,7 +464,8 @@ private fun HomePane(
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val gap = 10.dp
                 val visible = 6
-                val posterW = (maxWidth - gap * (visible - 1)) / visible
+                val sidePad = 4.dp
+                val posterW = (maxWidth - sidePad * 2 - gap * (visible - 1)) / visible
                 val posterH = posterW * 1.5f
                 var page by remember(movies) { mutableIntStateOf(0) }
                 var pageDir by remember { mutableIntStateOf(1) }
@@ -473,7 +474,7 @@ private fun HomePane(
                 val lastFocus = remember { FocusRequester() }
                 LaunchedEffect(movies) { page = 0 }
                 LaunchedEffect(page) {
-                    delay(30)
+                    delay(40)
                     runCatching {
                         if (pageDir < 0) lastFocus.requestFocus() else firstFocus.requestFocus()
                     }
@@ -482,32 +483,30 @@ private fun HomePane(
                     movies.drop(page * visible).take(visible)
                 }
                 Row(
-                    Modifier.fillMaxWidth(),
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = sidePad),
                     horizontalArrangement = Arrangement.spacedBy(gap),
                     verticalAlignment = Alignment.Bottom
                 ) {
                     pageItems.forEachIndexed { i, m ->
+                        val edgeRequester = when (i) {
+                            0 -> firstFocus
+                            pageItems.lastIndex -> lastFocus
+                            else -> null
+                        }
                         Poster(
                             url = m.streamIcon,
                             title = m.displayName,
                             modifier = Modifier
                                 .width(posterW)
                                 .height(posterH)
-                                .then(
-                                    when (i) {
-                                        0 -> Modifier.focusRequester(firstFocus)
-                                        pageItems.lastIndex -> Modifier.focusRequester(lastFocus)
-                                        else -> Modifier
-                                    }
-                                )
-                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
-                                .onFocusChanged { if (it.isFocused) featured = m }
                                 .onPreviewKeyEvent { e ->
                                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                     if (e.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent true
                                     when (e.nativeKeyEvent.keyCode) {
                                         AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                            if (i == pageItems.lastIndex && page < pageCount - 1) {
+                                            if (i >= pageItems.lastIndex && page < pageCount - 1) {
                                                 pageDir = 1
                                                 page += 1
                                                 true
@@ -523,6 +522,9 @@ private fun HomePane(
                                         else -> false
                                     }
                                 }
+                                .then(if (edgeRequester != null) Modifier.focusRequester(edgeRequester) else Modifier)
+                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
+                                .onFocusChanged { if (it.isFocused) featured = m }
                                 .clickable { onMovie(m) }
                                 .focusable()
                         )
