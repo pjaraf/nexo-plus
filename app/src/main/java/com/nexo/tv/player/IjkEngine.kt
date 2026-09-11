@@ -110,8 +110,8 @@ class IjkEngine(private val context: Context) {
         lastUrl = null // forzar reopen aunque sea la misma URL
         audioRescueTriedForUrl = null
         audioRescueStep = 0
-        // Empezar siempre con AudioTrack; el rescate puede pasar a OpenSLES.
-        liveAudioBackend = 0
+        // OpenSLES suele sacar audio por HDMI en TV Box cuando AudioTrack queda en standby.
+        liveAudioBackend = 1
         schedule(url, vod = false, debounceMs = debounceMs)
     }
 
@@ -554,8 +554,8 @@ class IjkEngine(private val context: Context) {
                     schedule(url, vod = false, debounceMs = 0L)
                 }
                 tracks.isEmpty() && audioRescueStep == 2 -> {
-                    liveAudioBackend = 1
-                    Log.w(TAG, "sin pista de audio; reabriendo con OpenSLES")
+                    liveAudioBackend = 0
+                    Log.w(TAG, "sin pista de audio; reabriendo con AudioTrack")
                     lastUrl = null
                     schedule(url, vod = false, debounceMs = 0L)
                 }
