@@ -1,7 +1,9 @@
 package com.nexo.tv.player
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -44,8 +46,10 @@ class IjkEngine(private val context: Context) {
     private var endedFiredForUrl: String? = null
     private var audioRescueTriedForUrl: String? = null
     private var audioCheck: Runnable? = null
-    /** 0 = AudioTrack (Android), 1 = OpenSLES. Se alterna al rescatar audio. */
-    private var liveAudioBackend = 0
+    /** 0 = AudioTrack, 1 = OpenSLES */
+    private var liveAudioBackend = 1
+    /** 0 = decode audio por software, 1 = mediacodec-audio (AC3/EAC3 por HDMI). */
+    private var liveMediacodecAudio = 0
     private var audioRescueStep = 0
 
     private val releaseExecutor = Executors.newSingleThreadExecutor()
@@ -110,8 +114,8 @@ class IjkEngine(private val context: Context) {
         lastUrl = null // forzar reopen aunque sea la misma URL
         audioRescueTriedForUrl = null
         audioRescueStep = 0
-        // OpenSLES suele sacar audio por HDMI en TV Box cuando AudioTrack queda en standby.
         liveAudioBackend = 1
+        liveMediacodecAudio = 0
         schedule(url, vod = false, debounceMs = debounceMs)
     }
 
@@ -390,11 +394,11 @@ class IjkEngine(private val context: Context) {
         }
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
-        // Backend de audio: AudioTrack por defecto; OpenSLES en rescate (TV Box HDMI).
         val useOpenSles = !vod && liveAudioBackend == 1
+        val useMcAudio = !vod && liveMediacodecAudio == 1
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", if (useOpenSles) 1L else 0L)
-        // Audio por software: mas compatible con AAC/AC3/EAC3 en IPTV que mediacodec-audio.
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-audio", 0L)
+        // Algunos nacionales (AC3/EAC3) solo suenan con mediacodec-audio hacia HDMI.
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-audio", if (useMcAudio) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "soundtouch", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "fast", 1L)
 
@@ -492,7 +496,6 @@ class IjkEngine(private val context: Context) {
             )
         } catch (_: Throwable) {}
         try {
-            // Evitar volumen de app/sistema en 0 (HDMI en standby sin samples).
             val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (max > 0 && cur <= 0) {
@@ -512,13 +515,14 @@ class IjkEngine(private val context: Context) {
             val audioIdx = tracks?.mapIndexedNotNull { index, t ->
                 if (t.trackType == ITrackInfo.MEDIA_TRACK_TYPE_AUDIO) index else null
             }.orEmpty()
-            Log.i(TAG, "audioTracks=${audioIdx.size} backend=$liveAudioBackend selected=${
-                runCatching { ijk.getSelectedTrack(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO) }.getOrDefault(-1)
-            }")
-            if (audioIdx.isEmpty()) return
             val selected = runCatching {
                 ijk.getSelectedTrack(ITrackInfo.MEDIA_TRACK_TYPE_AUDIO)
             }.getOrDefault(-1)
+            Log.i(
+                TAG,
+                "audioTracks=${audioIdx.size} backend=$liveAudioBackend mcAudio=$liveMediacodecAudio selected=$selected"
+            )
+            if (audioIdx.isEmpty()) return
             if (selected < 0 || selected !in audioIdx) {
                 ijk.selectTrack(audioIdx.first())
             }
@@ -527,54 +531,98 @@ class IjkEngine(private val context: Context) {
         }
     }
 
+    /** true si el sistema está sacando samples de media (no HDMI en standby). */
+    private fun isMediaAudible(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                audioManager.activePlaybackConfigurations.any { cfg ->
+                    val usage = cfg.audioAttributes.usage
+                    usage == AudioAttributes.USAGE_MEDIA ||
+                        usage == AudioAttributes.USAGE_GAME ||
+                        usage == AudioAttributes.USAGE_UNKNOWN
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.isMusicActive
+            }
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
     /**
-     * Si hay video pero no audio usable: reabrir el MISMO canal.
-     * Paso 0: re-probe. Paso 1: cambiar a OpenSLES. Paso 2: ciclar pistas.
+     * Video sin sonido real: reabre el MISMO canal con otra ruta de audio.
+     * 1) otra pista  2) AudioTrack  3) OpenSLES+mediacodec-audio  4) AudioTrack+mediacodec-audio
      */
     private fun scheduleAudioRescue(openGen: Int) {
         audioCheck?.let { main.removeCallbacks(it) }
         val url = lastUrl ?: return
-        if (audioRescueTriedForUrl == url && audioRescueStep >= 3) return
+        if (audioRescueStep >= 4) return
         val r = Runnable {
             if (released || openGen != gen || player == null) return@Runnable
             val p = player ?: return@Runnable
+            ensureAudible(p)
+            val audible = isMediaAudible()
             val tracks = audioTracks()
             val selected = currentAudioTrackId()
-            if (tracks.isNotEmpty() && selected >= 0) {
-                ensureAudible(p)
-                // Todavia puede estar mudo: forzar volumen y salir.
-                return@Runnable
-            }
+            Log.i(
+                TAG,
+                "audioRescue step=$audioRescueStep audible=$audible tracks=${tracks.size} sel=$selected backend=$liveAudioBackend mc=$liveMediacodecAudio"
+            )
+            if (audible) return@Runnable
+
             audioRescueStep++
             audioRescueTriedForUrl = url
-            when {
-                tracks.isEmpty() && audioRescueStep == 1 -> {
-                    Log.w(TAG, "sin pista de audio; reabriendo mismo canal (probe)")
+            when (audioRescueStep) {
+                1 -> {
+                    if (tracks.size > 1) {
+                        val next = tracks.firstOrNull { it.id != selected } ?: tracks.first()
+                        Log.w(TAG, "sin audio audible; probando pista ${next.name}")
+                        setAudioTrack(next.id)
+                        ensureAudible(p)
+                        try { p.start() } catch (_: Throwable) {}
+                        // Re-chequear sin subir de paso otra vez
+                        audioRescueStep = 1
+                        main.postDelayed({
+                            if (released || openGen != gen) return@postDelayed
+                            if (!isMediaAudible()) {
+                                liveAudioBackend = 0
+                                liveMediacodecAudio = 0
+                                Log.w(TAG, "sigue mudo; reabriendo AudioTrack software")
+                                lastUrl = null
+                                audioRescueStep = 2
+                                schedule(url, vod = false, debounceMs = 0L)
+                            }
+                        }, 1800L)
+                    } else {
+                        liveAudioBackend = 0
+                        liveMediacodecAudio = 0
+                        Log.w(TAG, "sin audio audible; reabriendo AudioTrack software")
+                        lastUrl = null
+                        schedule(url, vod = false, debounceMs = 0L)
+                    }
+                }
+                2 -> {
+                    liveAudioBackend = 1
+                    liveMediacodecAudio = 1
+                    Log.w(TAG, "sin audio audible; reabriendo OpenSLES + mediacodec-audio")
                     lastUrl = null
                     schedule(url, vod = false, debounceMs = 0L)
                 }
-                tracks.isEmpty() && audioRescueStep == 2 -> {
+                3 -> {
                     liveAudioBackend = 0
-                    Log.w(TAG, "sin pista de audio; reabriendo con AudioTrack")
+                    liveMediacodecAudio = 1
+                    Log.w(TAG, "sin audio audible; reabriendo AudioTrack + mediacodec-audio")
                     lastUrl = null
                     schedule(url, vod = false, debounceMs = 0L)
-                }
-                tracks.isNotEmpty() && selected < 0 -> {
-                    Log.w(TAG, "pista de audio no seleccionada; forzando primera")
-                    setAudioTrack(tracks.first().id)
-                    ensureAudible(p)
-                    try { p.start() } catch (_: Throwable) {}
                 }
                 else -> {
-                    liveAudioBackend = if (liveAudioBackend == 0) 1 else 0
-                    Log.w(TAG, "rescate audio backend=$liveAudioBackend step=$audioRescueStep")
-                    lastUrl = null
-                    schedule(url, vod = false, debounceMs = 0L)
+                    Log.w(TAG, "audioRescue agotado para $url")
                 }
             }
         }
         audioCheck = r
-        main.postDelayed(r, 1600L)
+        main.postDelayed(r, 2200L)
     }
 
     fun release() {
