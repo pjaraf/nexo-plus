@@ -64,6 +64,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -279,7 +280,7 @@ fun HubScreen(onLogout: () -> Unit) {
                 )
                 Tab.SERIES -> Box(
                     Modifier
-                        .padding(start = 88.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
+                        .padding(start = 88.dp, top = 8.dp, end = 16.dp, bottom = 8.dp)
                         .fillMaxSize()
                 ) {
                     val shelves = remember(catalogGen) { Catalog.seriesShelves }
@@ -305,7 +306,7 @@ fun HubScreen(onLogout: () -> Unit) {
                 }
                 Tab.MOVIES -> Box(
                     Modifier
-                        .padding(start = 88.dp, top = 12.dp, end = 12.dp, bottom = 12.dp)
+                        .padding(start = 88.dp, top = 8.dp, end = 16.dp, bottom = 8.dp)
                         .fillMaxSize()
                 ) {
                     val shelves = remember(catalogGen) { Catalog.movieShelves }
@@ -557,7 +558,7 @@ private fun CategoryBrowser(
             Row(
                 modifier = Modifier
                     .padding(start = 8.dp, bottom = 8.dp)
-                    .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.03f)
+                    .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Orange.copy(alpha = 0.92f))
                     .clickable { expanded = null }
@@ -577,18 +578,28 @@ private fun CategoryBrowser(
             )
         }
     } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            items(shelves, key = { it.id }) { shelf ->
-                CategoryShelfRow(
-                    shelf = shelf,
-                    onPoster = onPoster,
-                    onFocusId = onFocusId,
-                    onSeeAll = { expanded = shelf }
-                )
+        // 3 filas de categoría completas a la vista; cada fila = 6 posters + Ver completa.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val rowGap = 6.dp
+            val shelfH = (maxHeight - rowGap * 2) / 3
+            val listState = rememberLazyListState()
+            val snap = rememberSnapFlingBehavior(lazyListState = listState)
+            LazyColumn(
+                state = listState,
+                flingBehavior = snap,
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(rowGap),
+                contentPadding = PaddingValues(0.dp)
+            ) {
+                items(shelves, key = { it.id }) { shelf ->
+                    CategoryShelfRow(
+                        shelf = shelf,
+                        shelfHeight = shelfH,
+                        onPoster = onPoster,
+                        onFocusId = onFocusId,
+                        onSeeAll = { expanded = shelf }
+                    )
+                }
             }
         }
     }
@@ -597,69 +608,69 @@ private fun CategoryBrowser(
 @Composable
 private fun CategoryShelfRow(
     shelf: CategoryShelf,
+    shelfHeight: Dp,
     onPoster: (String) -> Unit,
     onFocusId: (String) -> Unit,
     onSeeAll: () -> Unit
 ) {
-    val previewCount = 7
-    val preview = remember(shelf) { shelf.posters.take(previewCount) }
-    val rowState = rememberLazyListState()
-    var seeAllFocused by remember { mutableStateOf(false) }
+    // 7 slots: 6 carátulas + "Ver categoría completa"
+    val posterSlots = 6
+    val preview = remember(shelf) { shelf.posters.take(posterSlots) }
 
-    LaunchedEffect(seeAllFocused) {
-        if (seeAllFocused) {
-            rowState.animateScrollToItem(preview.size)
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .height(shelfHeight)
+            .padding(horizontal = 4.dp)
+    ) {
         Text(
             text = shelf.name,
             color = Color.White,
-            fontSize = 18.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp, end = 8.dp)
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, end = 4.dp)
         )
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            // 7 carátulas visibles + la 8.ª apenas asomada hasta que llega el foco.
-            val gap = 8.dp
-            val visibleSlots = 7.28f
-            val posterW = (maxWidth - gap * 7) / visibleSlots
-            val posterH = posterW * 3f / 2f
-
-            LazyRow(
-                state = rowState,
-                horizontalArrangement = Arrangement.spacedBy(gap),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-                modifier = Modifier.fillMaxWidth()
+        BoxWithConstraints(
+            Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            val gap = 6.dp
+            val slots = 7
+            val wFromWidth = (maxWidth - gap * (slots - 1)) / slots
+            val wFromHeight = maxHeight * 2f / 3f
+            val posterW = minOf(wFromWidth, wFromHeight)
+            val posterH = posterW * 1.5f
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                items(preview, key = { it.id }) { poster ->
+                preview.forEach { poster ->
                     Poster(
                         url = poster.cover,
                         title = poster.title,
                         modifier = Modifier
                             .width(posterW)
                             .height(posterH)
-                            .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.04f)
+                            .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1f)
                             .onFocusChanged { if (it.isFocused) onFocusId(poster.id) }
                             .clickable { onPoster(poster.id) }
                             .focusable()
                     )
                 }
-                item(key = "see-all-${shelf.id}") {
-                    SeeAllCategoryCard(
-                        backdrop = shelf.posters.getOrNull(previewCount)?.cover
-                            ?: shelf.posters.firstOrNull()?.cover,
-                        categoryName = shelf.name,
-                        modifier = Modifier
-                            .width(posterW)
-                            .height(posterH),
-                        onFocused = { seeAllFocused = it },
-                        onClick = onSeeAll
-                    )
-                }
+                SeeAllCategoryCard(
+                    backdrop = shelf.posters.getOrNull(posterSlots)?.cover
+                        ?: shelf.posters.firstOrNull()?.cover,
+                    categoryName = shelf.name,
+                    modifier = Modifier
+                        .width(posterW)
+                        .height(posterH),
+                    onFocused = { },
+                    onClick = onSeeAll
+                )
             }
         }
     }
@@ -675,7 +686,7 @@ private fun SeeAllCategoryCard(
 ) {
     Box(
         modifier = modifier
-            .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.05f)
+            .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
             .clip(RoundedCornerShape(10.dp))
             .onFocusChanged { onFocused(it.isFocused) }
             .clickable(onClick = onClick)
