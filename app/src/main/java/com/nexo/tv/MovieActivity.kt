@@ -87,6 +87,7 @@ import com.nexo.tv.ui.CinematicBackdrop
 import com.nexo.tv.ui.PagedSixPosterRow
 import com.nexo.tv.ui.PosterImage
 import com.nexo.tv.data.BackdropCache
+import com.nexo.tv.ui.warmCinematicFanart
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.ContinueWatching
 import com.nexo.tv.data.SeriesDetailInfo
@@ -115,6 +116,7 @@ class MovieActivity : ComponentActivity() {
         val movieId = intent.getStringExtra(EXTRA_MOVIE_ID).orEmpty()
         val movieName = intent.getStringExtra(EXTRA_MOVIE_NAME).orEmpty()
         val movieCoverExtra = intent.getStringExtra(EXTRA_MOVIE_COVER).orEmpty()
+        val movieFanartExtra = intent.getStringExtra(EXTRA_MOVIE_FANART)?.trim().orEmpty()
         val categoryIdExtra = intent.getStringExtra(EXTRA_CATEGORY_ID).orEmpty()
         val extExtra = intent.getStringExtra(EXTRA_EXT)?.ifBlank { null } ?: "mp4"
         val resumeFromIntent = intent.getLongExtra(EXTRA_RESUME_MS, -1L)
@@ -144,6 +146,13 @@ class MovieActivity : ComponentActivity() {
             var resumeChoiceMs by remember { mutableLongStateOf(0L) }
             var expandAfterChoice by remember { mutableStateOf(false) }
             var resumeResolved by remember { mutableStateOf(false) }
+            // Fanart de inmediato: nunca carátula mientras llega el fanart.
+            var backdropUrl by remember {
+                mutableStateOf(
+                    BackdropCache.cachedMovieFanart(movieId)
+                        ?: movieFanartExtra.takeIf { it.isNotBlank() }
+                )
+            }
             val promptShowing = rememberUpdatedState(showResumePrompt)
             val rootFocus = remember { FocusRequester() }
             val playFocus = remember { FocusRequester() }
@@ -213,11 +222,13 @@ class MovieActivity : ComponentActivity() {
 
             fun openRelated(item: VodItem) {
                 persistProgress()
+                val fanart = BackdropCache.cachedMovieFanart(item.id).orEmpty()
                 startActivity(
                     Intent(this@MovieActivity, MovieActivity::class.java)
                         .putExtra(EXTRA_MOVIE_ID, item.id)
                         .putExtra(EXTRA_MOVIE_NAME, item.displayName)
                         .putExtra(EXTRA_MOVIE_COVER, item.streamIcon.orEmpty())
+                        .putExtra(EXTRA_MOVIE_FANART, fanart)
                         .putExtra(EXTRA_CATEGORY_ID, item.categoryId.orEmpty())
                         .putExtra(EXTRA_EXT, item.ext ?: "mp4")
                         .putExtra(EXTRA_USER, Session.username)
@@ -247,6 +258,17 @@ class MovieActivity : ComponentActivity() {
             }
 
             LaunchedEffect(movieId) {
+                backdropUrl?.let { warmCinematicFanart(this@MovieActivity, it) }
+                if (backdropUrl == null && !BackdropCache.isMovieFanartMiss(movieId)) {
+                    val url = BackdropCache.movieFanart(movieId)
+                    if (url != null) {
+                        backdropUrl = url
+                        warmCinematicFanart(this@MovieActivity, url)
+                    }
+                }
+            }
+
+            LaunchedEffect(movieId) {
                 loading = true
                 error = null
                 if (movieId.isBlank()) {
@@ -256,6 +278,17 @@ class MovieActivity : ComponentActivity() {
                 }
                 val (detail, ext) = XtreamClient.movieDetail(movieId)
                 info = detail
+                val fanart = detail?.fanartUrl?.takeIf { it.isNotBlank() }
+                if (fanart != null) {
+                    BackdropCache.putMovieFanart(movieId, fanart)
+                    backdropUrl = fanart
+                    warmCinematicFanart(this@MovieActivity, fanart)
+                } else {
+                    BackdropCache.markMovieFanartMiss(movieId)
+                    if (backdropUrl == null) {
+                        backdropUrl = (detail?.posterUrl ?: movieCoverExtra).takeIf { it.isNotBlank() }
+                    }
+                }
                 containerExt = ext.ifBlank { extExtra }
                 val saved = ContinueWatching.get(this@MovieActivity, "movie", movieId)
                 val wantResume = when {
@@ -360,9 +393,7 @@ class MovieActivity : ComponentActivity() {
 
             val title = info?.displayTitle?.takeIf { it.isNotBlank() } ?: movieName
             val cover = info?.posterUrl?.takeIf { it.isNotBlank() } ?: movieCoverExtra
-            val backdrop = info?.fanartUrl
-                ?: BackdropCache.cachedMovieFanart(movieId)
-                ?: cover.takeIf { it.isNotBlank() }
+            val backdrop = backdropUrl
             val castText = info?.cast?.takeIf { it.isNotBlank() } ?: "—"
             val plotText = info?.displayPlot
                 ?: "Disfruta de esta película en alta definición."
@@ -817,6 +848,7 @@ class MovieActivity : ComponentActivity() {
         const val EXTRA_MOVIE_ID = "movie_id"
         const val EXTRA_MOVIE_NAME = "movie_name"
         const val EXTRA_MOVIE_COVER = "movie_cover"
+        const val EXTRA_MOVIE_FANART = "movie_fanart"
         const val EXTRA_CATEGORY_ID = "category_id"
         const val EXTRA_EXT = "ext"
         const val EXTRA_RESUME_MS = "resume_ms"

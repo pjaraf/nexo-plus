@@ -86,6 +86,7 @@ import androidx.compose.ui.zIndex
 import com.nexo.tv.ui.CinematicBackdrop
 import com.nexo.tv.ui.PagedSixPosterRow
 import com.nexo.tv.ui.PosterImage
+import com.nexo.tv.ui.warmCinematicFanart
 import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.ContinueWatching
 import com.nexo.tv.data.SeriesDetailInfo
@@ -115,6 +116,7 @@ class SeriesActivity : ComponentActivity() {
         val seriesId = intent.getStringExtra(EXTRA_SERIES_ID).orEmpty()
         val seriesName = intent.getStringExtra(EXTRA_SERIES_NAME).orEmpty()
         val seriesCoverExtra = intent.getStringExtra(EXTRA_SERIES_COVER).orEmpty()
+        val seriesFanartExtra = intent.getStringExtra(EXTRA_SERIES_FANART)?.trim().orEmpty()
         val categoryIdExtra = intent.getStringExtra(EXTRA_CATEGORY_ID).orEmpty()
         val resumeEpisodeId = intent.getStringExtra(EXTRA_RESUME_EPISODE_ID).orEmpty()
         val resumeFromIntent = intent.getLongExtra(EXTRA_RESUME_MS, -1L)
@@ -148,6 +150,12 @@ class SeriesActivity : ComponentActivity() {
             var resumeChoiceMs by remember { mutableLongStateOf(0L) }
             var expandAfterChoice by remember { mutableStateOf(false) }
             var resumeResolved by remember { mutableStateOf(false) }
+            var backdropUrl by remember {
+                mutableStateOf(
+                    BackdropCache.cachedSeriesFanart(seriesId)
+                        ?: seriesFanartExtra.takeIf { it.isNotBlank() }
+                )
+            }
             val promptShowing = rememberUpdatedState(showResumePrompt)
             val rootFocus = remember { FocusRequester() }
             val playFocus = remember { FocusRequester() }
@@ -252,11 +260,13 @@ class SeriesActivity : ComponentActivity() {
 
             fun openRelated(item: SeriesItem) {
                 persistProgress()
+                val fanart = BackdropCache.cachedSeriesFanart(item.id).orEmpty()
                 startActivity(
                     Intent(this@SeriesActivity, SeriesActivity::class.java)
                         .putExtra(EXTRA_SERIES_ID, item.id)
                         .putExtra(EXTRA_SERIES_NAME, item.name)
                         .putExtra(EXTRA_SERIES_COVER, item.cover.orEmpty())
+                        .putExtra(EXTRA_SERIES_FANART, fanart)
                         .putExtra(EXTRA_CATEGORY_ID, item.categoryId.orEmpty())
                         .putExtra(EXTRA_USER, Session.username)
                         .putExtra(EXTRA_PASS, Session.password)
@@ -287,11 +297,34 @@ class SeriesActivity : ComponentActivity() {
             }
 
             LaunchedEffect(seriesId) {
+                backdropUrl?.let { warmCinematicFanart(this@SeriesActivity, it) }
+                if (backdropUrl == null && !BackdropCache.isSeriesFanartMiss(seriesId)) {
+                    val url = BackdropCache.seriesFanart(seriesId)
+                    if (url != null) {
+                        backdropUrl = url
+                        warmCinematicFanart(this@SeriesActivity, url)
+                    }
+                }
+            }
+
+            LaunchedEffect(seriesId) {
                 loading = true
                 error = null
                 nextEpisodeMsg = false
                 val detail = XtreamClient.seriesDetail(seriesId)
                 info = detail.info
+                val fanart = detail.info?.fanartUrl?.takeIf { it.isNotBlank() }
+                if (fanart != null) {
+                    BackdropCache.putSeriesFanart(seriesId, fanart)
+                    backdropUrl = fanart
+                    warmCinematicFanart(this@SeriesActivity, fanart)
+                } else {
+                    BackdropCache.markSeriesFanartMiss(seriesId)
+                    if (backdropUrl == null) {
+                        backdropUrl = (detail.info?.posterUrl ?: seriesCoverExtra)
+                            .takeIf { it.isNotBlank() }
+                    }
+                }
                 seasons = detail.episodes
                 val saved = ContinueWatching.get(this@SeriesActivity, "series", seriesId)
                 val wantEpId = resumeEpisodeId.ifBlank { saved?.episodeId.orEmpty() }
@@ -429,9 +462,7 @@ class SeriesActivity : ComponentActivity() {
 
             val title = info?.displayTitle?.takeIf { it.isNotBlank() } ?: seriesName
             val cover = info?.posterUrl?.takeIf { it.isNotBlank() } ?: seriesCoverExtra
-            val backdrop = info?.fanartUrl
-                ?: BackdropCache.cachedSeriesFanart(seriesId)
-                ?: cover.takeIf { it.isNotBlank() }
+            val backdrop = backdropUrl
             val castText = info?.cast?.takeIf { it.isNotBlank() } ?: "—"
             val plotText = info?.displayPlot
                 ?: "Disfruta de todos los episodios en alta definición."
@@ -1000,6 +1031,7 @@ class SeriesActivity : ComponentActivity() {
         const val EXTRA_SERIES_ID = "series_id"
         const val EXTRA_SERIES_NAME = "series_name"
         const val EXTRA_SERIES_COVER = "series_cover"
+        const val EXTRA_SERIES_FANART = "series_fanart"
         const val EXTRA_CATEGORY_ID = "category_id"
         const val EXTRA_RESUME_EPISODE_ID = "resume_episode_id"
         const val EXTRA_RESUME_MS = "resume_ms"

@@ -43,6 +43,34 @@ object BackdropCache {
         return key.isNotBlank() && key in seriesMiss
     }
 
+    fun putMovieFanart(vodId: String, url: String) {
+        val key = keyOf(vodId)
+        val clean = url.trim()
+        if (key.isBlank() || clean.isBlank()) return
+        movieFanart[key] = clean
+        movieMiss.remove(key)
+    }
+
+    fun putSeriesFanart(seriesId: String, url: String) {
+        val key = keyOf(seriesId)
+        val clean = url.trim()
+        if (key.isBlank() || clean.isBlank()) return
+        seriesFanart[key] = clean
+        seriesMiss.remove(key)
+    }
+
+    fun markMovieFanartMiss(vodId: String) {
+        val key = keyOf(vodId)
+        if (key.isBlank()) return
+        if (key !in movieFanart) movieMiss.add(key)
+    }
+
+    fun markSeriesFanartMiss(seriesId: String) {
+        val key = keyOf(seriesId)
+        if (key.isBlank()) return
+        if (key !in seriesFanart) seriesMiss.add(key)
+    }
+
     suspend fun movieFanart(vodId: String): String? = withContext(Dispatchers.IO) {
         val key = keyOf(vodId)
         if (key.isBlank()) return@withContext null

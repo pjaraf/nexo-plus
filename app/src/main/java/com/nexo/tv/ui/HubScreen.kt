@@ -238,12 +238,15 @@ fun HubScreen(onLogout: () -> Unit) {
     }
 
     fun openMovie(item: VodItem, resumeMs: Long = -1L) {
+        val fanart = BackdropCache.cachedMovieFanart(item.id)
+        fanart?.let { warmCinematicFanart(ctx, it) }
         AppExit.openChildActivity {
             ctx.startActivity(
                 Intent(ctx, MovieActivity::class.java)
                     .putExtra(MovieActivity.EXTRA_MOVIE_ID, item.id)
                     .putExtra(MovieActivity.EXTRA_MOVIE_NAME, item.displayName)
                     .putExtra(MovieActivity.EXTRA_MOVIE_COVER, item.streamIcon.orEmpty())
+                    .putExtra(MovieActivity.EXTRA_MOVIE_FANART, fanart.orEmpty())
                     .putExtra(MovieActivity.EXTRA_CATEGORY_ID, item.categoryId.orEmpty())
                     .putExtra(MovieActivity.EXTRA_EXT, item.ext ?: "mp4")
                     .putExtra(MovieActivity.EXTRA_RESUME_MS, resumeMs)
@@ -259,12 +262,15 @@ fun HubScreen(onLogout: () -> Unit) {
         resumeEpisodeId: String = "",
         resumeMs: Long = -1L
     ) {
+        val fanart = BackdropCache.cachedSeriesFanart(item.id)
+        fanart?.let { warmCinematicFanart(ctx, it) }
         AppExit.openChildActivity {
             ctx.startActivity(
                 Intent(ctx, SeriesActivity::class.java)
                     .putExtra(SeriesActivity.EXTRA_SERIES_ID, item.id)
                     .putExtra(SeriesActivity.EXTRA_SERIES_NAME, item.name)
                     .putExtra(SeriesActivity.EXTRA_SERIES_COVER, item.cover.orEmpty())
+                    .putExtra(SeriesActivity.EXTRA_SERIES_FANART, fanart.orEmpty())
                     .putExtra(SeriesActivity.EXTRA_CATEGORY_ID, item.categoryId.orEmpty())
                     .putExtra(SeriesActivity.EXTRA_RESUME_EPISODE_ID, resumeEpisodeId)
                     .putExtra(SeriesActivity.EXTRA_RESUME_MS, resumeMs)
