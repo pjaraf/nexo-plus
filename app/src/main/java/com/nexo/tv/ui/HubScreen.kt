@@ -1,6 +1,7 @@
 package com.nexo.tv.ui
 
 import android.content.Intent
+import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,8 +54,10 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -413,9 +415,6 @@ private fun HomePane(
             featured = movies.firstOrNull()
         }
     }
-    val listState = rememberLazyListState()
-    val snap = rememberSnapFlingBehavior(lazyListState = listState)
-    val scope = rememberCoroutineScope()
 
     Column(
         Modifier
@@ -461,40 +460,67 @@ private fun HomePane(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
             )
         } else {
-            // Siempre 6 carátulas enteras: tamaño fijo + clip + al enfocar alinea al inicio.
-            BoxWithConstraints(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RectangleShape)
-            ) {
-                val gap = 12.dp
+            // Páginas fijas de 6 carátulas enteras (sin recortes al navegar).
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val gap = 10.dp
                 val visible = 6
                 val posterW = (maxWidth - gap * (visible - 1)) / visible
                 val posterH = posterW * 1.5f
-                LazyRow(
-                    state = listState,
-                    flingBehavior = snap,
+                var page by remember(movies) { mutableIntStateOf(0) }
+                var pageDir by remember { mutableIntStateOf(1) }
+                val pageCount = ((movies.size + visible - 1) / visible).coerceAtLeast(1)
+                val firstFocus = remember { FocusRequester() }
+                val lastFocus = remember { FocusRequester() }
+                LaunchedEffect(movies) { page = 0 }
+                LaunchedEffect(page) {
+                    delay(30)
+                    runCatching {
+                        if (pageDir < 0) lastFocus.requestFocus() else firstFocus.requestFocus()
+                    }
+                }
+                val pageItems = remember(movies, page) {
+                    movies.drop(page * visible).take(visible)
+                }
+                Row(
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(gap),
-                    contentPadding = PaddingValues(0.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RectangleShape)
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    itemsIndexed(movies, key = { _, m -> m.id }) { index, m ->
+                    pageItems.forEachIndexed { i, m ->
                         Poster(
                             url = m.streamIcon,
                             title = m.displayName,
                             modifier = Modifier
                                 .width(posterW)
                                 .height(posterH)
+                                .then(
+                                    when (i) {
+                                        0 -> Modifier.focusRequester(firstFocus)
+                                        pageItems.lastIndex -> Modifier.focusRequester(lastFocus)
+                                        else -> Modifier
+                                    }
+                                )
                                 .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
-                                .onFocusChanged { focus ->
-                                    if (focus.isFocused) {
-                                        featured = m
-                                        scope.launch {
-                                            // Alinea la enfocada al borde izquierdo → 6 enteras a la vista.
-                                            listState.animateScrollToItem(index)
+                                .onFocusChanged { if (it.isFocused) featured = m }
+                                .onPreviewKeyEvent { e ->
+                                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    if (e.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent true
+                                    when (e.nativeKeyEvent.keyCode) {
+                                        AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                            if (i == pageItems.lastIndex && page < pageCount - 1) {
+                                                pageDir = 1
+                                                page += 1
+                                                true
+                                            } else false
                                         }
+                                        AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
+                                            if (i == 0 && page > 0) {
+                                                pageDir = -1
+                                                page -= 1
+                                                true
+                                            } else false
+                                        }
+                                        else -> false
                                     }
                                 }
                                 .clickable { onMovie(m) }
