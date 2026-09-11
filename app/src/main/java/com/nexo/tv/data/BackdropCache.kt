@@ -18,20 +18,33 @@ object BackdropCache {
     private val movieLocks = ConcurrentHashMap<String, Mutex>()
     private val seriesLocks = ConcurrentHashMap<String, Mutex>()
 
+    private fun keyOf(id: String): String = id.substringBefore(".0").trim()
+
     fun cachedMovieFanart(vodId: String): String? {
-        val key = vodId.substringBefore(".0").trim()
+        val key = keyOf(vodId)
         if (key.isBlank()) return null
         return movieFanart[key]
     }
 
     fun cachedSeriesFanart(seriesId: String): String? {
-        val key = seriesId.substringBefore(".0").trim()
+        val key = keyOf(seriesId)
         if (key.isBlank()) return null
         return seriesFanart[key]
     }
 
+    /** Ya se consultó y no hay fanart (se puede usar carátula sin esperar). */
+    fun isMovieFanartMiss(vodId: String): Boolean {
+        val key = keyOf(vodId)
+        return key.isNotBlank() && key in movieMiss
+    }
+
+    fun isSeriesFanartMiss(seriesId: String): Boolean {
+        val key = keyOf(seriesId)
+        return key.isNotBlank() && key in seriesMiss
+    }
+
     suspend fun movieFanart(vodId: String): String? = withContext(Dispatchers.IO) {
-        val key = vodId.substringBefore(".0").trim()
+        val key = keyOf(vodId)
         if (key.isBlank()) return@withContext null
         movieFanart[key]?.let { return@withContext it }
         if (key in movieMiss) return@withContext null
@@ -48,7 +61,7 @@ object BackdropCache {
     }
 
     suspend fun seriesFanart(seriesId: String): String? = withContext(Dispatchers.IO) {
-        val key = seriesId.substringBefore(".0").trim()
+        val key = keyOf(seriesId)
         if (key.isBlank()) return@withContext null
         seriesFanart[key]?.let { return@withContext it }
         if (key in seriesMiss) return@withContext null
