@@ -419,7 +419,7 @@ private fun HomePane(
     Column(
         Modifier
             .fillMaxSize()
-            .padding(start = 88.dp, end = 20.dp, top = 26.dp, bottom = 14.dp)
+            .padding(start = 88.dp, end = 28.dp, top = 26.dp, bottom = 14.dp)
     ) {
         featured?.let { movie ->
             Column(Modifier.fillMaxWidth()) {
