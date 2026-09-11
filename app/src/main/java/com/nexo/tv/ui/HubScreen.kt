@@ -64,7 +64,6 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -578,28 +577,18 @@ private fun CategoryBrowser(
             )
         }
     } else {
-        // Exactamente 3 filas de categorías visibles, sin cortar carátulas.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val rowGap = 8.dp
-            val shelfH = (maxHeight - rowGap * 2) / 3
-            val listState = rememberLazyListState()
-            val snap = rememberSnapFlingBehavior(lazyListState = listState)
-            LazyColumn(
-                state = listState,
-                flingBehavior = snap,
-                modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(rowGap),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                items(shelves, key = { it.id }) { shelf ->
-                    CategoryShelfRow(
-                        shelf = shelf,
-                        shelfHeight = shelfH,
-                        onPoster = onPoster,
-                        onFocusId = onFocusId,
-                        onSeeAll = { expanded = shelf }
-                    )
-                }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            items(shelves, key = { it.id }) { shelf ->
+                CategoryShelfRow(
+                    shelf = shelf,
+                    onPoster = onPoster,
+                    onFocusId = onFocusId,
+                    onSeeAll = { expanded = shelf }
+                )
             }
         }
     }
@@ -608,125 +597,67 @@ private fun CategoryBrowser(
 @Composable
 private fun CategoryShelfRow(
     shelf: CategoryShelf,
-    shelfHeight: Dp,
     onPoster: (String) -> Unit,
     onFocusId: (String) -> Unit,
     onSeeAll: () -> Unit
 ) {
-    val visible = 6
-    var page by remember(shelf.id) { mutableIntStateOf(0) }
-    var pageDir by remember { mutableIntStateOf(1) }
-    val pageCount = ((shelf.posters.size + visible - 1) / visible).coerceAtLeast(1)
-    val firstFocus = remember { FocusRequester() }
-    val lastFocus = remember { FocusRequester() }
-    LaunchedEffect(shelf.id) { page = 0 }
-    LaunchedEffect(page, shelf.id) {
-        delay(40)
-        runCatching {
-            if (pageDir < 0) lastFocus.requestFocus() else firstFocus.requestFocus()
+    val previewCount = 7
+    val preview = remember(shelf) { shelf.posters.take(previewCount) }
+    val rowState = rememberLazyListState()
+    var seeAllFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(seeAllFocused) {
+        if (seeAllFocused) {
+            rowState.animateScrollToItem(preview.size)
         }
-    }
-    val pageItems = remember(shelf.posters, page) {
-        shelf.posters.drop(page * visible).take(visible)
     }
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .height(shelfHeight)
-            .padding(horizontal = 4.dp)
-    ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = shelf.name,
-                color = Color.White,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 4.dp, end = 8.dp)
-            )
-            Text(
-                text = "Ver todas",
-                color = Color.White,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1f)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Orange.copy(alpha = 0.88f))
-                    .clickable(onClick = onSeeAll)
-                    .focusable()
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        BoxWithConstraints(
-            Modifier
-                .fillMaxWidth()
-                .weight(1f)
-        ) {
+    Column(Modifier.fillMaxWidth()) {
+        Text(
+            text = shelf.name,
+            color = Color.White,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp, bottom = 8.dp, end = 8.dp)
+        )
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            // 7 carátulas visibles + la 8.ª apenas asomada hasta que llega el foco.
             val gap = 8.dp
-            val usable = maxWidth * 0.98f
-            val byWidth = (usable - gap * (visible - 1)) / visible
-            val byHeight = maxHeight
-            val posterW = minOf(byWidth, byHeight * 2f / 3f)
-            val posterH = posterW * 1.5f
-            Row(
-                Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
+            val visibleSlots = 7.28f
+            val posterW = (maxWidth - gap * 7) / visibleSlots
+            val posterH = posterW * 3f / 2f
+
+            LazyRow(
+                state = rowState,
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                if (page > 0) {
-                    Box(
-                        Modifier
-                            .size(1.dp)
-                            .onFocusChanged {
-                                if (it.isFocused) {
-                                    pageDir = -1
-                                    page -= 1
-                                }
-                            }
+                items(preview, key = { it.id }) { poster ->
+                    Poster(
+                        url = poster.cover,
+                        title = poster.title,
+                        modifier = Modifier
+                            .width(posterW)
+                            .height(posterH)
+                            .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.04f)
+                            .onFocusChanged { if (it.isFocused) onFocusId(poster.id) }
+                            .clickable { onPoster(poster.id) }
                             .focusable()
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    pageItems.forEachIndexed { i, poster ->
-                        val edgeRequester = when (i) {
-                            0 -> firstFocus
-                            pageItems.lastIndex -> lastFocus
-                            else -> null
-                        }
-                        Poster(
-                            url = poster.cover,
-                            title = poster.title,
-                            modifier = Modifier
-                                .width(posterW)
-                                .height(posterH)
-                                .then(if (edgeRequester != null) Modifier.focusRequester(edgeRequester) else Modifier)
-                                .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1f)
-                                .onFocusChanged { if (it.isFocused) onFocusId(poster.id) }
-                                .clickable { onPoster(poster.id) }
-                                .focusable()
-                        )
-                    }
-                }
-                if (page < pageCount - 1) {
-                    Box(
-                        Modifier
-                            .size(1.dp)
-                            .onFocusChanged {
-                                if (it.isFocused) {
-                                    pageDir = 1
-                                    page += 1
-                                }
-                            }
-                            .focusable()
+                item(key = "see-all-${shelf.id}") {
+                    SeeAllCategoryCard(
+                        backdrop = shelf.posters.getOrNull(previewCount)?.cover
+                            ?: shelf.posters.firstOrNull()?.cover,
+                        categoryName = shelf.name,
+                        modifier = Modifier
+                            .width(posterW)
+                            .height(posterH),
+                        onFocused = { seeAllFocused = it },
+                        onClick = onSeeAll
                     )
                 }
             }
@@ -816,7 +747,7 @@ private fun PosterGrid(
     onClick: (String) -> Unit = {},
     onFocusId: (String) -> Unit = {}
 ) {
-    val cols = 6
+    val cols = 7
     val rowsPerPage = 3
     val pageSize = cols * rowsPerPage
     val pages = remember(items) { items.chunked(pageSize) }
