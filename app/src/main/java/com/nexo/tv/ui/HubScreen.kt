@@ -54,6 +54,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -578,16 +579,22 @@ private fun CategoryBrowser(
             )
         }
     } else {
-        // 3 filas de categoría completas a la vista; cada fila = 6 posters + Ver completa.
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val rowGap = 6.dp
+        // Exactamente 3 filas visibles; cada fila = 7 posters + Ver categoria (8 slots).
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .clip(RectangleShape)
+        ) {
+            val rowGap = 4.dp
             val shelfH = (maxHeight - rowGap * 2) / 3
             val listState = rememberLazyListState()
             val snap = rememberSnapFlingBehavior(lazyListState = listState)
             LazyColumn(
                 state = listState,
                 flingBehavior = snap,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RectangleShape),
                 verticalArrangement = Arrangement.spacedBy(rowGap),
                 contentPadding = PaddingValues(0.dp)
             ) {
@@ -613,36 +620,39 @@ private fun CategoryShelfRow(
     onFocusId: (String) -> Unit,
     onSeeAll: () -> Unit
 ) {
-    // 7 slots: 6 carátulas + "Ver categoría completa"
-    val posterSlots = 6
+    // 8 slots: 7 carátulas + "Ver categoría completa"
+    val posterSlots = 7
     val preview = remember(shelf) { shelf.posters.take(posterSlots) }
 
     Column(
         Modifier
             .fillMaxWidth()
             .height(shelfHeight)
-            .padding(horizontal = 4.dp)
+            .clip(RectangleShape)
+            .padding(horizontal = 2.dp)
     ) {
         Text(
             text = shelf.name,
             color = Color.White,
-            fontSize = 15.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp, end = 4.dp)
+            modifier = Modifier.padding(start = 2.dp, bottom = 2.dp, end = 2.dp)
         )
         BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
-                .weight(1f)
+                .weight(1f, fill = true)
+                .clip(RectangleShape)
         ) {
-            val gap = 6.dp
-            val slots = 7
-            val wFromWidth = (maxWidth - gap * (slots - 1)) / slots
-            val wFromHeight = maxHeight * 2f / 3f
-            val posterW = minOf(wFromWidth, wFromHeight)
-            val posterH = posterW * 1.5f
+            val gap = 5.dp
+            val slots = 8
+            // Nunca superar el alto disponible: evita recorte arriba/abajo.
+            val maxPosterH = maxHeight
+            val maxPosterW = (maxWidth - gap * (slots - 1)) / slots
+            val posterW = minOf(maxPosterW, maxPosterH * 2f / 3f)
+            val posterH = minOf(posterW * 1.5f, maxPosterH)
             Row(
                 Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
