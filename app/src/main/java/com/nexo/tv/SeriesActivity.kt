@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -69,6 +71,8 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -552,9 +556,11 @@ class SeriesActivity : ComponentActivity() {
                                 .zIndex(2f)
                                 .padding(horizontal = 22.dp, vertical = 10.dp)
                         ) {
-                            // Carátula izq. + info (sin mini player)
+                            // Carátula izq. | info | mini player 16:9
                             Row(
-                                Modifier.fillMaxWidth(),
+                                Modifier
+                                    .weight(1.05f, fill = true)
+                                    .fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.Top
                             ) {
@@ -570,7 +576,9 @@ class SeriesActivity : ComponentActivity() {
                                 )
 
                                 Column(
-                                    Modifier.weight(1f),
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
                                     verticalArrangement = Arrangement.Top
                                 ) {
                                     Row(
@@ -667,6 +675,21 @@ class SeriesActivity : ComponentActivity() {
                                         }
                                     }
                                 }
+
+                                Box(
+                                    Modifier
+                                        .width(360.dp)
+                                        .aspectRatio(16f / 9f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.Black)
+                                        .onGloballyPositioned { coords ->
+                                            val pos = coords.positionInRoot()
+                                            slotX = pos.x.roundToInt()
+                                            slotY = pos.y.roundToInt()
+                                            slotW = coords.size.width
+                                            slotH = coords.size.height
+                                        }
+                                )
                             }
 
                             Spacer(Modifier.height(8.dp))
