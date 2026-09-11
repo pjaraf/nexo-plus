@@ -85,7 +85,7 @@ fun CinematicBackdrop(
                 model = model,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                filterQuality = if (fromPoster) FilterQuality.Low else FilterQuality.Default,
+                filterQuality = if (fromPoster) FilterQuality.Low else FilterQuality.Medium,
                 modifier = imageMod
             )
             val vertical = if (fromPoster) {
