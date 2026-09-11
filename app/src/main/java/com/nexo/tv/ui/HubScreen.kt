@@ -464,8 +464,9 @@ private fun HomePane(
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val gap = 10.dp
                 val visible = 6
-                val sidePad = 4.dp
-                val posterW = (maxWidth - sidePad * 2 - gap * (visible - 1)) / visible
+                // Deja aire a la derecha para que la 6.ª nunca se corte.
+                val usable = maxWidth * 0.92f
+                val posterW = (usable - gap * (visible - 1)) / visible
                 val posterH = posterW * 1.5f
                 var page by remember(movies) { mutableIntStateOf(0) }
                 var pageDir by remember { mutableIntStateOf(1) }
@@ -483,49 +484,56 @@ private fun HomePane(
                     movies.drop(page * visible).take(visible)
                 }
                 Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = sidePad),
-                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.Bottom
                 ) {
-                    pageItems.forEachIndexed { i, m ->
-                        val edgeRequester = when (i) {
-                            0 -> firstFocus
-                            pageItems.lastIndex -> lastFocus
-                            else -> null
-                        }
-                        Poster(
-                            url = m.streamIcon,
-                            title = m.displayName,
-                            modifier = Modifier
-                                .width(posterW)
-                                .height(posterH)
-                                .onPreviewKeyEvent { e ->
-                                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                                    if (e.nativeKeyEvent.repeatCount > 0) return@onPreviewKeyEvent true
-                                    when (e.nativeKeyEvent.keyCode) {
-                                        AndroidKeyEvent.KEYCODE_DPAD_RIGHT -> {
-                                            if (i >= pageItems.lastIndex && page < pageCount - 1) {
-                                                pageDir = 1
-                                                page += 1
-                                                true
-                                            } else false
-                                        }
-                                        AndroidKeyEvent.KEYCODE_DPAD_LEFT -> {
-                                            if (i == 0 && page > 0) {
-                                                pageDir = -1
-                                                page -= 1
-                                                true
-                                            } else false
-                                        }
-                                        else -> false
+                    // Sentinela izq.: al enfocar, página anterior.
+                    if (page > 0) {
+                        Box(
+                            Modifier
+                                .size(1.dp)
+                                .onFocusChanged {
+                                    if (it.isFocused) {
+                                        pageDir = -1
+                                        page -= 1
                                     }
                                 }
-                                .then(if (edgeRequester != null) Modifier.focusRequester(edgeRequester) else Modifier)
-                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
-                                .onFocusChanged { if (it.isFocused) featured = m }
-                                .clickable { onMovie(m) }
+                                .focusable()
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        pageItems.forEachIndexed { i, m ->
+                            val edgeRequester = when (i) {
+                                0 -> firstFocus
+                                pageItems.lastIndex -> lastFocus
+                                else -> null
+                            }
+                            Poster(
+                                url = m.streamIcon,
+                                title = m.displayName,
+                                modifier = Modifier
+                                    .width(posterW)
+                                    .height(posterH)
+                                    .then(if (edgeRequester != null) Modifier.focusRequester(edgeRequester) else Modifier)
+                                    .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
+                                    .onFocusChanged { if (it.isFocused) featured = m }
+                                    .clickable { onMovie(m) }
+                                    .focusable()
+                            )
+                        }
+                    }
+                    // Sentinela der.: al enfocar, página siguiente.
+                    if (page < pageCount - 1) {
+                        Box(
+                            Modifier
+                                .size(1.dp)
+                                .onFocusChanged {
+                                    if (it.isFocused) {
+                                        pageDir = 1
+                                        page += 1
+                                    }
+                                }
                                 .focusable()
                         )
                     }
