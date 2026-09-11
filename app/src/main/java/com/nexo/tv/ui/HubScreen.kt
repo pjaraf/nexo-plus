@@ -575,7 +575,10 @@ private fun CategoryBrowser(
             PosterGrid(
                 items = gridItems,
                 onClick = onPoster,
-                onFocusId = onFocusId
+                onFocusId = onFocusId,
+                modifier = Modifier
+                    .weight(1f, fill = true)
+                    .fillMaxWidth()
             )
         }
     } else {
@@ -817,47 +820,68 @@ private fun SeeAllCategoryCard(
 private fun PosterGrid(
     items: List<Pair<String, Pair<String?, String>>>,
     onClick: (String) -> Unit = {},
-    onFocusId: (String) -> Unit = {}
+    onFocusId: (String) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val cols = 7
     val rowsPerPage = 3
     val pageSize = cols * rowsPerPage
     val pages = remember(items) { items.chunked(pageSize) }
-    val listState = rememberLazyListState()
-    val snap = rememberSnapFlingBehavior(lazyListState = listState)
-    val scope = rememberCoroutineScope()
-    var focusedPage by remember { mutableIntStateOf(0) }
+    var page by remember(items) { mutableIntStateOf(0) }
+    var pageDir by remember { mutableIntStateOf(1) }
+    val pageCount = pages.size.coerceAtLeast(1)
+    val pageItems = pages.getOrElse(page) { emptyList() }
+    val topFocus = remember { FocusRequester() }
+    val bottomFocus = remember { FocusRequester() }
 
-    LaunchedEffect(focusedPage) {
-        if (pages.isEmpty()) return@LaunchedEffect
-        val target = focusedPage.coerceIn(0, pages.lastIndex)
-        listState.animateScrollToItem(target)
+    LaunchedEffect(items) { page = 0 }
+    LaunchedEffect(page, pageItems.size) {
+        delay(40)
+        runCatching {
+            when {
+                pageDir < 0 && pageItems.size > cols -> bottomFocus.requestFocus()
+                else -> topFocus.requestFocus()
+            }
+        }
     }
 
-    LazyColumn(
-        state = listState,
-        flingBehavior = snap,
-        modifier = Modifier.fillMaxSize(),
-        userScrollEnabled = true
-    ) {
-        items(
-            count = pages.size,
-            key = { page -> "page-$page-${pages[page].firstOrNull()?.first}" }
-        ) { pageIndex ->
-            PosterPage(
-                items = pages[pageIndex],
-                cols = cols,
-                rows = rowsPerPage,
-                onClick = onClick,
-                onFocusId = onFocusId,
-                onFocusPage = {
-                    if (focusedPage != pageIndex) {
-                        focusedPage = pageIndex
-                    } else {
-                        scope.launch { listState.animateScrollToItem(pageIndex) }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        PosterPage(
+            items = pageItems,
+            cols = cols,
+            rows = rowsPerPage,
+            topFocus = topFocus,
+            bottomFocus = bottomFocus,
+            onClick = onClick,
+            onFocusId = onFocusId,
+            modifier = Modifier.fillMaxSize()
+        )
+        if (page > 0) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .size(1.dp)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            pageDir = -1
+                            page -= 1
+                        }
                     }
-                },
-                modifier = Modifier.fillParentMaxSize()
+                    .focusable()
+            )
+        }
+        if (page < pageCount - 1) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .size(1.dp)
+                    .onFocusChanged {
+                        if (it.isFocused) {
+                            pageDir = 1
+                            page += 1
+                        }
+                    }
+                    .focusable()
             )
         }
     }
@@ -868,54 +892,71 @@ private fun PosterPage(
     items: List<Pair<String, Pair<String?, String>>>,
     cols: Int,
     rows: Int,
+    topFocus: FocusRequester,
+    bottomFocus: FocusRequester,
     onClick: (String) -> Unit,
     onFocusId: (String) -> Unit,
-    onFocusPage: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val hGap = 6.dp
-    val vGap = 6.dp
-    val pad = 4.dp
+    val hGap = 8.dp
+    val vGap = 8.dp
     val rowItems = remember(items, cols) { items.chunked(cols) }
 
-    Column(
-        modifier = modifier.padding(pad),
-        verticalArrangement = Arrangement.spacedBy(vGap)
-    ) {
-        repeat(rows) { rowIndex ->
-            val row = rowItems.getOrNull(rowIndex).orEmpty()
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(hGap),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(cols) { colIndex ->
-                    val item = row.getOrNull(colIndex)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (item != null) {
-                            Poster(
-                                url = item.second.first,
-                                title = item.second.second,
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .aspectRatio(2f / 3f)
-                                    .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1.03f)
-                                    .onFocusChanged {
-                                        if (it.isFocused) {
-                                            onFocusPage()
-                                            onFocusId(item.first)
+    BoxWithConstraints(modifier) {
+        val rowH = (maxHeight - vGap * (rows - 1)) / rows
+        val maxPosterW = (maxWidth - hGap * (cols - 1)) / cols
+        // Que quepa entero en la celda (ratio 2:3), sin recorte por alto.
+        val posterH = minOf(rowH, maxPosterW * 1.5f)
+        val posterW = posterH * 2f / 3f
+
+        Column(
+            Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(vGap)
+        ) {
+            repeat(rows) { rowIndex ->
+                val row = rowItems.getOrNull(rowIndex).orEmpty()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(rowH),
+                    horizontalArrangement = Arrangement.spacedBy(hGap, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(cols) { colIndex ->
+                        val item = row.getOrNull(colIndex)
+                        val lastRowIndex = (rowItems.size - 1).coerceAtLeast(0)
+                        val edgeRequester = when {
+                            rowIndex == 0 && colIndex == 0 -> topFocus
+                            rowIndex == lastRowIndex && colIndex == 0 && lastRowIndex > 0 -> bottomFocus
+                            else -> null
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(posterW)
+                                .height(posterH),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (item != null) {
+                                Poster(
+                                    url = item.second.first,
+                                    title = item.second.second,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .then(
+                                            if (edgeRequester != null) {
+                                                Modifier.focusRequester(edgeRequester)
+                                            } else {
+                                                Modifier
+                                            }
+                                        )
+                                        .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1f)
+                                        .onFocusChanged {
+                                            if (it.isFocused) onFocusId(item.first)
                                         }
-                                    }
-                                    .clickable { onClick(item.first) }
-                                    .focusable()
-                            )
+                                        .clickable { onClick(item.first) }
+                                        .focusable()
+                                )
+                            }
                         }
                     }
                 }
