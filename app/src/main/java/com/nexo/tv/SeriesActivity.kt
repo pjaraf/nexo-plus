@@ -84,6 +84,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.zIndex
 import com.nexo.tv.ui.CinematicBackdrop
+import com.nexo.tv.ui.PagedSixPosterRow
 import com.nexo.tv.ui.PosterImage
 import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.ContinueWatching
@@ -811,46 +812,18 @@ class SeriesActivity : ComponentActivity() {
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Spacer(Modifier.height(6.dp))
-                                BoxWithConstraints(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f, fill = true)
-                                ) {
-                                    val gap = 10.dp
-                                    val visible = 6
-                                    val widthForPosters = (maxWidth - gap * (visible - 1)) / visible
-                                    val posterW = minOf(widthForPosters, maxHeight * 2f / 3f)
-                                    val posterH = posterW * 1.5f
-                                    LazyRow(
-                                        horizontalArrangement = Arrangement.spacedBy(gap),
-                                        contentPadding = PaddingValues(bottom = 2.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        items(recommended, key = { it.id }) { item ->
-                                            var focused by remember(item.id) { mutableStateOf(false) }
-                                            PosterImage(
-                                                url = item.cover,
-                                                contentDescription = item.name,
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier
-                                                    .width(posterW)
-                                                    .height(posterH)
-                                                    .onFocusChanged { focused = it.isFocused }
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .border(
-                                                        BorderStroke(
-                                                            if (focused) 2.dp else 0.dp,
-                                                            if (focused) SeriesBlue else Color.Transparent
-                                                        ),
-                                                        RoundedCornerShape(8.dp)
-                                                    )
-                                                    .background(Color(0xFF222222))
-                                                    .clickable { openRelated(item) }
-                                                    .focusable()
-                                            )
-                                        }
-                                    }
+                                val recItems = remember(recommended) {
+                                    recommended.map { it.id to it.cover }
                                 }
+                                val recById = remember(recommended) {
+                                    recommended.associateBy { it.id }
+                                }
+                                PagedSixPosterRow(
+                                    items = recItems,
+                                    onClickItem = { id ->
+                                        recById[id]?.let { openRelated(it) }
+                                    }
+                                )
                             }
                         }
                     }
