@@ -62,13 +62,13 @@ object BackdropCache {
     fun markMovieFanartMiss(vodId: String) {
         val key = keyOf(vodId)
         if (key.isBlank()) return
-        if (key !in movieFanart) movieMiss.add(key)
+        if (!movieFanart.containsKey(key)) movieMiss.add(key)
     }
 
     fun markSeriesFanartMiss(seriesId: String) {
         val key = keyOf(seriesId)
         if (key.isBlank()) return
-        if (key !in seriesFanart) seriesMiss.add(key)
+        if (!seriesFanart.containsKey(key)) seriesMiss.add(key)
     }
 
     suspend fun movieFanart(vodId: String): String? = withContext(Dispatchers.IO) {
