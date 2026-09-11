@@ -732,28 +732,28 @@ private fun SeeAllCategoryCard(
                 imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
                 tint = Color.White,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(22.dp)
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
             Text(
                 "Ver categoría",
                 color = Color.White,
                 fontWeight = FontWeight.Black,
-                fontSize = 13.sp,
+                fontSize = 11.sp,
                 textAlign = TextAlign.Center
             )
             Text(
                 "completa",
                 color = Color.White.copy(alpha = 0.95f),
                 fontWeight = FontWeight.Bold,
-                fontSize = 13.sp,
+                fontSize = 11.sp,
                 textAlign = TextAlign.Center
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(2.dp))
             Text(
                 categoryName,
                 color = Color.White.copy(alpha = 0.8f),
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center
