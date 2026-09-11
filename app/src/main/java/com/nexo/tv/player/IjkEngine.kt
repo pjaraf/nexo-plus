@@ -114,10 +114,10 @@ class IjkEngine(private val context: Context) {
         lastUrl = null // forzar reopen aunque sea la misma URL
         audioRescueTriedForUrl = null
         audioRescueStep = 0
-        // Nacionales CH/CL: muchos streams usan AC3/EAC3; mediacodec-audio + OpenSLES
-        // es la ruta que mas a menudo saca sonido por HDMI en esta TV Box.
+        // Por defecto: OpenSLES + decode software (AAC/MP2 OK en Nacionales).
+        // Si queda mudo (tipico AC3), el rescate prueba mediacodec-audio.
         liveAudioBackend = 1
-        liveMediacodecAudio = 1
+        liveMediacodecAudio = 0
         schedule(url, vod = false, debounceMs = debounceMs)
     }
 
@@ -587,33 +587,33 @@ class IjkEngine(private val context: Context) {
                         main.postDelayed({
                             if (released || openGen != gen) return@postDelayed
                             if (!isMediaAudible()) {
-                                liveAudioBackend = 1
+                                liveAudioBackend = 0
                                 liveMediacodecAudio = 0
-                                Log.w(TAG, "sigue mudo; reabriendo OpenSLES software")
+                                Log.w(TAG, "sigue mudo; reabriendo AudioTrack software")
                                 lastUrl = null
                                 audioRescueStep = 2
                                 schedule(url, vod = false, debounceMs = 0L)
                             }
                         }, 1800L)
                     } else {
-                        liveAudioBackend = 1
+                        liveAudioBackend = 0
                         liveMediacodecAudio = 0
-                        Log.w(TAG, "sin audio audible; reabriendo OpenSLES software")
+                        Log.w(TAG, "sin audio audible; reabriendo AudioTrack software")
                         lastUrl = null
                         schedule(url, vod = false, debounceMs = 0L)
                     }
                 }
                 2 -> {
-                    liveAudioBackend = 0
+                    liveAudioBackend = 1
                     liveMediacodecAudio = 1
-                    Log.w(TAG, "sin audio audible; reabriendo AudioTrack + mediacodec-audio")
+                    Log.w(TAG, "sin audio audible; reabriendo OpenSLES + mediacodec-audio (AC3)")
                     lastUrl = null
                     schedule(url, vod = false, debounceMs = 0L)
                 }
                 3 -> {
                     liveAudioBackend = 0
-                    liveMediacodecAudio = 0
-                    Log.w(TAG, "sin audio audible; reabriendo AudioTrack software")
+                    liveMediacodecAudio = 1
+                    Log.w(TAG, "sin audio audible; reabriendo AudioTrack + mediacodec-audio")
                     lastUrl = null
                     schedule(url, vod = false, debounceMs = 0L)
                 }
