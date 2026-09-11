@@ -153,6 +153,7 @@ class MovieActivity : ComponentActivity() {
                         ?: movieFanartExtra.takeIf { it.isNotBlank() }
                 )
             }
+            var backdropFromPoster by remember { mutableStateOf(false) }
             val promptShowing = rememberUpdatedState(showResumePrompt)
             val rootFocus = remember { FocusRequester() }
             val playFocus = remember { FocusRequester() }
@@ -258,12 +259,13 @@ class MovieActivity : ComponentActivity() {
             }
 
             LaunchedEffect(movieId) {
-                backdropUrl?.let { warmCinematicFanart(this@MovieActivity, it) }
+                backdropUrl?.let { warmCinematicFanart(this@MovieActivity, it, fromPoster = false) }
                 if (backdropUrl == null && !BackdropCache.isMovieFanartMiss(movieId)) {
                     val url = BackdropCache.movieFanart(movieId)
                     if (url != null) {
                         backdropUrl = url
-                        warmCinematicFanart(this@MovieActivity, url)
+                        backdropFromPoster = false
+                        warmCinematicFanart(this@MovieActivity, url, fromPoster = false)
                     }
                 }
             }
@@ -282,11 +284,15 @@ class MovieActivity : ComponentActivity() {
                 if (fanart != null) {
                     BackdropCache.putMovieFanart(movieId, fanart)
                     backdropUrl = fanart
-                    warmCinematicFanart(this@MovieActivity, fanart)
+                    backdropFromPoster = false
+                    warmCinematicFanart(this@MovieActivity, fanart, fromPoster = false)
                 } else {
                     BackdropCache.markMovieFanartMiss(movieId)
                     if (backdropUrl == null) {
-                        backdropUrl = (detail?.posterUrl ?: movieCoverExtra).takeIf { it.isNotBlank() }
+                        val coverBg = (detail?.posterUrl ?: movieCoverExtra).takeIf { it.isNotBlank() }
+                        backdropUrl = coverBg
+                        backdropFromPoster = coverBg != null
+                        coverBg?.let { warmCinematicFanart(this@MovieActivity, it, fromPoster = true) }
                     }
                 }
                 containerExt = ext.ifBlank { extExtra }
@@ -493,6 +499,7 @@ class MovieActivity : ComponentActivity() {
                 if (!fullScreen) {
                     CinematicBackdrop(
                         url = backdrop,
+                        fromPoster = backdropFromPoster,
                         modifier = Modifier.fillMaxSize().zIndex(0f)
                     )
 

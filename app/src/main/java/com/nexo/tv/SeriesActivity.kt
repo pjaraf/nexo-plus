@@ -156,6 +156,7 @@ class SeriesActivity : ComponentActivity() {
                         ?: seriesFanartExtra.takeIf { it.isNotBlank() }
                 )
             }
+            var backdropFromPoster by remember { mutableStateOf(false) }
             val promptShowing = rememberUpdatedState(showResumePrompt)
             val rootFocus = remember { FocusRequester() }
             val playFocus = remember { FocusRequester() }
@@ -297,12 +298,13 @@ class SeriesActivity : ComponentActivity() {
             }
 
             LaunchedEffect(seriesId) {
-                backdropUrl?.let { warmCinematicFanart(this@SeriesActivity, it) }
+                backdropUrl?.let { warmCinematicFanart(this@SeriesActivity, it, fromPoster = false) }
                 if (backdropUrl == null && !BackdropCache.isSeriesFanartMiss(seriesId)) {
                     val url = BackdropCache.seriesFanart(seriesId)
                     if (url != null) {
                         backdropUrl = url
-                        warmCinematicFanart(this@SeriesActivity, url)
+                        backdropFromPoster = false
+                        warmCinematicFanart(this@SeriesActivity, url, fromPoster = false)
                     }
                 }
             }
@@ -317,12 +319,16 @@ class SeriesActivity : ComponentActivity() {
                 if (fanart != null) {
                     BackdropCache.putSeriesFanart(seriesId, fanart)
                     backdropUrl = fanart
-                    warmCinematicFanart(this@SeriesActivity, fanart)
+                    backdropFromPoster = false
+                    warmCinematicFanart(this@SeriesActivity, fanart, fromPoster = false)
                 } else {
                     BackdropCache.markSeriesFanartMiss(seriesId)
                     if (backdropUrl == null) {
-                        backdropUrl = (detail.info?.posterUrl ?: seriesCoverExtra)
+                        val coverBg = (detail.info?.posterUrl ?: seriesCoverExtra)
                             .takeIf { it.isNotBlank() }
+                        backdropUrl = coverBg
+                        backdropFromPoster = coverBg != null
+                        coverBg?.let { warmCinematicFanart(this@SeriesActivity, it, fromPoster = true) }
                     }
                 }
                 seasons = detail.episodes
@@ -568,6 +574,7 @@ class SeriesActivity : ComponentActivity() {
                 if (!fullScreen) {
                     CinematicBackdrop(
                         url = backdrop,
+                        fromPoster = backdropFromPoster,
                         modifier = Modifier.fillMaxSize().zIndex(0f)
                     )
 

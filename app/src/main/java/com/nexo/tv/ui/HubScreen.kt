@@ -103,6 +103,7 @@ fun HubScreen(onLogout: () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var tab by remember { mutableStateOf(Tab.HOME) }
     var hubBackdropUrl by remember { mutableStateOf<String?>(null) }
+    var hubBackdropFromPoster by remember { mutableStateOf(false) }
     var fanartRequest by remember { mutableStateOf<FanartRequest?>(null) }
     val catalogGen by Catalog.generationFlow.collectAsState()
     val movies = remember(catalogGen) { Catalog.movies }
@@ -181,7 +182,7 @@ fun HubScreen(onLogout: () -> Unit) {
     }
 
     // Fanart primero: nunca mostrar carátula mientras llega el fanart.
-    // Carátula solo si ya sabemos que no hay fanart (miss) o tras consultar.
+    // Sin fanart: fondo automatico generado desde la carátula (blur cinematografico).
     LaunchedEffect(fanartRequest) {
         val req = fanartRequest ?: return@LaunchedEffect
         val cover = req.coverFallback?.trim()?.takeIf { it.isNotBlank() }
@@ -192,7 +193,8 @@ fun HubScreen(onLogout: () -> Unit) {
         }
         if (cached != null) {
             hubBackdropUrl = cached
-            warmCinematicFanart(ctx, cached)
+            hubBackdropFromPoster = false
+            warmCinematicFanart(ctx, cached, fromPoster = false)
             return@LaunchedEffect
         }
         val knownMiss = if (req.series) {
@@ -203,7 +205,8 @@ fun HubScreen(onLogout: () -> Unit) {
         if (knownMiss) {
             if (cover != null) {
                 hubBackdropUrl = cover
-                warmCinematicFanart(ctx, cover)
+                hubBackdropFromPoster = true
+                warmCinematicFanart(ctx, cover, fromPoster = true)
             }
             return@LaunchedEffect
         }
@@ -214,10 +217,14 @@ fun HubScreen(onLogout: () -> Unit) {
             BackdropCache.movieFanart(req.id)
         }
         if (fanartRequest != req) return@LaunchedEffect
-        val next = url ?: cover
-        if (next != null) {
-            hubBackdropUrl = next
-            warmCinematicFanart(ctx, next)
+        if (url != null) {
+            hubBackdropUrl = url
+            hubBackdropFromPoster = false
+            warmCinematicFanart(ctx, url, fromPoster = false)
+        } else if (cover != null) {
+            hubBackdropUrl = cover
+            hubBackdropFromPoster = true
+            warmCinematicFanart(ctx, cover, fromPoster = true)
         }
     }
 
@@ -227,10 +234,11 @@ fun HubScreen(onLogout: () -> Unit) {
             launch(Dispatchers.IO) {
                 val url = BackdropCache.movieFanart(m.id) ?: return@launch
                 withContext(Dispatchers.Main.immediate) {
-                    warmCinematicFanart(ctx, url)
+                    warmCinematicFanart(ctx, url, fromPoster = false)
                     // Si es la destacada actual y aún no hay fondo, aplicar ya.
                     if (index == 0 && hubBackdropUrl == null) {
                         hubBackdropUrl = url
+                        hubBackdropFromPoster = false
                     }
                 }
             }
@@ -239,7 +247,7 @@ fun HubScreen(onLogout: () -> Unit) {
 
     fun openMovie(item: VodItem, resumeMs: Long = -1L) {
         val fanart = BackdropCache.cachedMovieFanart(item.id)
-        fanart?.let { warmCinematicFanart(ctx, it) }
+        fanart?.let { warmCinematicFanart(ctx, it, fromPoster = false) }
         AppExit.openChildActivity {
             ctx.startActivity(
                 Intent(ctx, MovieActivity::class.java)
@@ -263,7 +271,7 @@ fun HubScreen(onLogout: () -> Unit) {
         resumeMs: Long = -1L
     ) {
         val fanart = BackdropCache.cachedSeriesFanart(item.id)
-        fanart?.let { warmCinematicFanart(ctx, it) }
+        fanart?.let { warmCinematicFanart(ctx, it, fromPoster = false) }
         AppExit.openChildActivity {
             ctx.startActivity(
                 Intent(ctx, SeriesActivity::class.java)
@@ -293,7 +301,10 @@ fun HubScreen(onLogout: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize()) {
-        CinematicBackdrop(url = if (tab == Tab.TV) null else hubBackdropUrl)
+        CinematicBackdrop(
+            url = if (tab == Tab.TV) null else hubBackdropUrl,
+            fromPoster = hubBackdropFromPoster && tab != Tab.TV
+        )
 
         Box(Modifier.fillMaxSize()) {
             when (tab) {
@@ -309,9 +320,13 @@ fun HubScreen(onLogout: () -> Unit) {
                             val cover = movie.streamIcon?.trim()?.takeIf { it.isNotBlank() }
                             val cached = BackdropCache.cachedMovieFanart(id)
                             when {
-                                cached != null -> hubBackdropUrl = cached
+                                cached != null -> {
+                                    hubBackdropUrl = cached
+                                    hubBackdropFromPoster = false
+                                }
                                 BackdropCache.isMovieFanartMiss(id) && cover != null -> {
                                     hubBackdropUrl = cover
+                                    hubBackdropFromPoster = true
                                 }
                                 // Si hay fanart pendiente, no poner carátula: mantiene el fondo anterior.
                             }
@@ -343,9 +358,13 @@ fun HubScreen(onLogout: () -> Unit) {
                                     val cover = s.cover?.trim()?.takeIf { it.isNotBlank() }
                                     val cached = BackdropCache.cachedSeriesFanart(id)
                                     when {
-                                        cached != null -> hubBackdropUrl = cached
+                                        cached != null -> {
+                                            hubBackdropUrl = cached
+                                            hubBackdropFromPoster = false
+                                        }
                                         BackdropCache.isSeriesFanartMiss(id) && cover != null -> {
                                             hubBackdropUrl = cover
+                                            hubBackdropFromPoster = true
                                         }
                                     }
                                     fanartRequest = FanartRequest(id, series = true, coverFallback = cover)
@@ -378,9 +397,13 @@ fun HubScreen(onLogout: () -> Unit) {
                                     val cover = m.streamIcon?.trim()?.takeIf { it.isNotBlank() }
                                     val cached = BackdropCache.cachedMovieFanart(id)
                                     when {
-                                        cached != null -> hubBackdropUrl = cached
+                                        cached != null -> {
+                                            hubBackdropUrl = cached
+                                            hubBackdropFromPoster = false
+                                        }
                                         BackdropCache.isMovieFanartMiss(id) && cover != null -> {
                                             hubBackdropUrl = cover
+                                            hubBackdropFromPoster = true
                                         }
                                     }
                                     fanartRequest = FanartRequest(id, series = false, coverFallback = cover)
