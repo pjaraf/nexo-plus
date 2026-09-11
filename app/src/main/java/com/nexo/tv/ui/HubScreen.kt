@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,6 +54,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -70,8 +72,6 @@ import com.nexo.tv.LiveActivity
 import com.nexo.tv.MovieActivity
 import com.nexo.tv.SeriesActivity
 import com.nexo.tv.Session
-import com.nexo.tv.ui.CinematicBackdrop
-import com.nexo.tv.ui.warmCinematicFanart
 import com.nexo.tv.data.BackdropCache
 import com.nexo.tv.data.Catalog
 import com.nexo.tv.data.CategoryShelf
@@ -413,6 +413,9 @@ private fun HomePane(
             featured = movies.firstOrNull()
         }
     }
+    val listState = rememberLazyListState()
+    val snap = rememberSnapFlingBehavior(lazyListState = listState)
+    val scope = rememberCoroutineScope()
 
     Column(
         Modifier
@@ -458,26 +461,42 @@ private fun HomePane(
                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 14.dp)
             )
         } else {
-            // ~6 carátulas enteras a la vista; el resto al moverse a los lados.
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            // Siempre 6 carátulas enteras: tamaño fijo + clip + al enfocar alinea al inicio.
+            BoxWithConstraints(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RectangleShape)
+            ) {
                 val gap = 12.dp
                 val visible = 6
                 val posterW = (maxWidth - gap * (visible - 1)) / visible
                 val posterH = posterW * 1.5f
                 LazyRow(
+                    state = listState,
+                    flingBehavior = snap,
                     horizontalArrangement = Arrangement.spacedBy(gap),
-                    contentPadding = PaddingValues(vertical = 6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    contentPadding = PaddingValues(0.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RectangleShape)
                 ) {
-                    items(movies, key = { it.id }) { m ->
+                    itemsIndexed(movies, key = { _, m -> m.id }) { index, m ->
                         Poster(
                             url = m.streamIcon,
                             title = m.displayName,
                             modifier = Modifier
                                 .width(posterW)
                                 .height(posterH)
-                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1.04f)
-                                .onFocusChanged { if (it.isFocused) featured = m }
+                                .tvFocus(shape = RoundedCornerShape(10.dp), focusedScale = 1f)
+                                .onFocusChanged { focus ->
+                                    if (focus.isFocused) {
+                                        featured = m
+                                        scope.launch {
+                                            // Alinea la enfocada al borde izquierdo → 6 enteras a la vista.
+                                            listState.animateScrollToItem(index)
+                                        }
+                                    }
+                                }
                                 .clickable { onMovie(m) }
                                 .focusable()
                         )
