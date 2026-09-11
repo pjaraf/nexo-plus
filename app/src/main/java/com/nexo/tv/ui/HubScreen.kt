@@ -579,48 +579,78 @@ private fun CategoryBrowser(
             )
         }
     } else {
-        // Paginas de exactamente 3 filas completas (sin recorte al bajar).
-        // Cada fila = 7 posters + Ver categoria (8 slots).
-        BoxWithConstraints(
-            Modifier
-                .fillMaxSize()
-                .clip(RectangleShape)
-        ) {
+        // Exactamente 3 filas visibles por página. Sin LazyColumn: el scroll parcial
+        // era lo que cortaba carátulas arriba y dejaba asomar una 4ª fila abajo.
+        BoxWithConstraints(Modifier.fillMaxSize()) {
             val rowsPerPage = 3
-            val rowGap = 4.dp
-            val pageH = maxHeight
-            val shelfH = (pageH - rowGap * (rowsPerPage - 1)) / rowsPerPage
+            val rowGap = 6.dp
+            val shelfH = (maxHeight - rowGap * (rowsPerPage - 1)) / rowsPerPage
             val pages = remember(shelves) { shelves.chunked(rowsPerPage) }
-            val listState = rememberLazyListState()
-            val snap = rememberSnapFlingBehavior(lazyListState = listState)
-            LazyColumn(
-                state = listState,
-                flingBehavior = snap,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RectangleShape),
-                contentPadding = PaddingValues(0.dp)
-            ) {
-                items(pages.size, key = { pages[it].first().id }) { pageIndex ->
-                    val pageShelves = pages[pageIndex]
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(pageH)
-                            .clip(RectangleShape),
-                        verticalArrangement = Arrangement.spacedBy(rowGap)
-                    ) {
-                        pageShelves.forEach { shelf ->
-                            CategoryShelfRow(
-                                shelf = shelf,
-                                shelfHeight = shelfH,
-                                onPoster = onPoster,
-                                onFocusId = onFocusId,
-                                onSeeAll = { expanded = shelf }
-                            )
-                        }
+            var page by remember(shelves) { mutableIntStateOf(0) }
+            var pageDir by remember { mutableIntStateOf(1) }
+            val pageCount = pages.size.coerceAtLeast(1)
+            val pageShelves = pages.getOrElse(page) { emptyList() }
+            val topFocus = remember { FocusRequester() }
+            val bottomFocus = remember { FocusRequester() }
+
+            LaunchedEffect(shelves) { page = 0 }
+            LaunchedEffect(page, pageShelves.size) {
+                delay(40)
+                runCatching {
+                    when {
+                        pageDir < 0 && pageShelves.size > 1 -> bottomFocus.requestFocus()
+                        else -> topFocus.requestFocus()
                     }
                 }
+            }
+
+            Column(
+                Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(rowGap)
+            ) {
+                pageShelves.forEachIndexed { rowIndex, shelf ->
+                    val edgeRequester = when {
+                        rowIndex == 0 -> topFocus
+                        rowIndex == pageShelves.lastIndex -> bottomFocus
+                        else -> null
+                    }
+                    CategoryShelfRow(
+                        shelf = shelf,
+                        shelfHeight = shelfH,
+                        firstPosterRequester = edgeRequester,
+                        onPoster = onPoster,
+                        onFocusId = onFocusId,
+                        onSeeAll = { expanded = shelf }
+                    )
+                }
+            }
+            if (page > 0) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .size(1.dp)
+                        .onFocusChanged {
+                            if (it.isFocused) {
+                                pageDir = -1
+                                page -= 1
+                            }
+                        }
+                        .focusable()
+                )
+            }
+            if (page < pageCount - 1) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .size(1.dp)
+                        .onFocusChanged {
+                            if (it.isFocused) {
+                                pageDir = 1
+                                page += 1
+                            }
+                        }
+                        .focusable()
+                )
             }
         }
     }
@@ -630,6 +660,7 @@ private fun CategoryBrowser(
 private fun CategoryShelfRow(
     shelf: CategoryShelf,
     shelfHeight: Dp,
+    firstPosterRequester: FocusRequester? = null,
     onPoster: (String) -> Unit,
     onFocusId: (String) -> Unit,
     onSeeAll: () -> Unit
@@ -642,43 +673,49 @@ private fun CategoryShelfRow(
         Modifier
             .fillMaxWidth()
             .height(shelfHeight)
-            .clip(RectangleShape)
             .padding(horizontal = 2.dp)
     ) {
         Text(
             text = shelf.name,
             color = Color.White,
-            fontSize = 13.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 2.dp, bottom = 2.dp, end = 2.dp)
+            modifier = Modifier.padding(start = 2.dp, bottom = 3.dp, end = 2.dp)
         )
         BoxWithConstraints(
             Modifier
                 .fillMaxWidth()
                 .weight(1f, fill = true)
-                .clip(RectangleShape)
         ) {
-            val gap = 5.dp
+            val gap = 6.dp
             val slots = 8
-            // Nunca superar el alto disponible: evita recorte arriba/abajo.
+            // Alto primero: la carátula siempre cabe entera en la fila (ratio 2:3).
             val maxPosterH = maxHeight
             val maxPosterW = (maxWidth - gap * (slots - 1)) / slots
-            val posterW = minOf(maxPosterW, maxPosterH * 2f / 3f)
-            val posterH = minOf(posterW * 1.5f, maxPosterH)
+            val posterH = minOf(maxPosterH, maxPosterW * 1.5f)
+            val posterW = posterH * 2f / 3f
             Row(
                 Modifier.fillMaxSize(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                preview.forEach { poster ->
+                preview.forEachIndexed { index, poster ->
                     Poster(
                         url = poster.cover,
                         title = poster.title,
+                        contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .width(posterW)
                             .height(posterH)
+                            .then(
+                                if (index == 0 && firstPosterRequester != null) {
+                                    Modifier.focusRequester(firstPosterRequester)
+                                } else {
+                                    Modifier
+                                }
+                            )
                             .tvFocus(shape = RoundedCornerShape(8.dp), focusedScale = 1f)
                             .onFocusChanged { if (it.isFocused) onFocusId(poster.id) }
                             .clickable { onPoster(poster.id) }
@@ -888,11 +925,16 @@ private fun PosterPage(
 }
 
 @Composable
-private fun Poster(url: String?, title: String, modifier: Modifier = Modifier) {
+private fun Poster(
+    url: String?,
+    title: String,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop
+) {
     PosterImage(
         url = url,
         contentDescription = title,
-        contentScale = ContentScale.Crop,
+        contentScale = contentScale,
         modifier = modifier.clip(RoundedCornerShape(8.dp))
     )
 }
