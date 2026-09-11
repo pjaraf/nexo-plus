@@ -579,14 +579,18 @@ private fun CategoryBrowser(
             )
         }
     } else {
-        // Exactamente 3 filas visibles; cada fila = 7 posters + Ver categoria (8 slots).
+        // Paginas de exactamente 3 filas completas (sin recorte al bajar).
+        // Cada fila = 7 posters + Ver categoria (8 slots).
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
                 .clip(RectangleShape)
         ) {
+            val rowsPerPage = 3
             val rowGap = 4.dp
-            val shelfH = (maxHeight - rowGap * 2) / 3
+            val pageH = maxHeight
+            val shelfH = (pageH - rowGap * (rowsPerPage - 1)) / rowsPerPage
+            val pages = remember(shelves) { shelves.chunked(rowsPerPage) }
             val listState = rememberLazyListState()
             val snap = rememberSnapFlingBehavior(lazyListState = listState)
             LazyColumn(
@@ -595,17 +599,27 @@ private fun CategoryBrowser(
                 modifier = Modifier
                     .fillMaxSize()
                     .clip(RectangleShape),
-                verticalArrangement = Arrangement.spacedBy(rowGap),
                 contentPadding = PaddingValues(0.dp)
             ) {
-                items(shelves, key = { it.id }) { shelf ->
-                    CategoryShelfRow(
-                        shelf = shelf,
-                        shelfHeight = shelfH,
-                        onPoster = onPoster,
-                        onFocusId = onFocusId,
-                        onSeeAll = { expanded = shelf }
-                    )
+                items(pages.size, key = { pages[it].first().id }) { pageIndex ->
+                    val pageShelves = pages[pageIndex]
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(pageH)
+                            .clip(RectangleShape),
+                        verticalArrangement = Arrangement.spacedBy(rowGap)
+                    ) {
+                        pageShelves.forEach { shelf ->
+                            CategoryShelfRow(
+                                shelf = shelf,
+                                shelfHeight = shelfH,
+                                onPoster = onPoster,
+                                onFocusId = onFocusId,
+                                onSeeAll = { expanded = shelf }
+                            )
+                        }
+                    }
                 }
             }
         }
