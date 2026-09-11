@@ -91,7 +91,11 @@ private val PosterW = 132.dp
 private val PosterH = 188.dp
 
 private enum class Tab { HOME, TV, SERIES, MOVIES }
-private data class FanartRequest(val id: String, val series: Boolean)
+private data class FanartRequest(
+    val id: String,
+    val series: Boolean,
+    val coverFallback: String? = null
+)
 
 @Composable
 fun HubScreen(onLogout: () -> Unit) {
@@ -176,26 +180,30 @@ fun HubScreen(onLogout: () -> Unit) {
         runCatching { liveFocus.requestFocus() }
     }
 
-    // Fanart: mantener la escena anterior hasta que llegue la nueva (sin flash NEXO).
+    // Fanart: si no hay escena, usar carátula para que el fondo nunca quede vacío.
     LaunchedEffect(fanartRequest) {
         val req = fanartRequest ?: return@LaunchedEffect
+        val cover = req.coverFallback?.trim()?.takeIf { it.isNotBlank() }
         val cached = if (req.series) {
             BackdropCache.cachedSeriesFanart(req.id)
         } else {
             BackdropCache.cachedMovieFanart(req.id)
         }
-        if (cached != null) {
-            hubBackdropUrl = cached
-            warmCinematicFanart(ctx, cached)
+        val immediate = cached ?: cover
+        if (immediate != null) {
+            hubBackdropUrl = immediate
+            warmCinematicFanart(ctx, immediate)
         }
         val url = if (req.series) {
             BackdropCache.seriesFanart(req.id)
         } else {
             BackdropCache.movieFanart(req.id)
         }
-        if (fanartRequest == req && url != null) {
-            hubBackdropUrl = url
-            warmCinematicFanart(ctx, url)
+        if (fanartRequest != req) return@LaunchedEffect
+        val next = url ?: cover
+        if (next != null) {
+            hubBackdropUrl = next
+            warmCinematicFanart(ctx, next)
         }
     }
 
@@ -274,8 +282,10 @@ fun HubScreen(onLogout: () -> Unit) {
                         if (id == null) {
                             fanartRequest = null
                         } else {
+                            val cover = movie.streamIcon?.trim()?.takeIf { it.isNotBlank() }
                             BackdropCache.cachedMovieFanart(id)?.let { hubBackdropUrl = it }
-                            fanartRequest = FanartRequest(id, series = false)
+                                ?: cover?.let { hubBackdropUrl = it }
+                            fanartRequest = FanartRequest(id, series = false, coverFallback = cover)
                         }
                     }
                 )
@@ -299,8 +309,12 @@ fun HubScreen(onLogout: () -> Unit) {
                             shelves = shelves,
                             onPoster = { id -> seriesById[id]?.let { openSeries(it) } },
                             onFocusId = { id ->
-                                BackdropCache.cachedSeriesFanart(id)?.let { hubBackdropUrl = it }
-                                fanartRequest = FanartRequest(id, series = true)
+                                seriesById[id]?.let { s ->
+                                    val cover = s.cover?.trim()?.takeIf { it.isNotBlank() }
+                                    BackdropCache.cachedSeriesFanart(id)?.let { hubBackdropUrl = it }
+                                        ?: cover?.let { hubBackdropUrl = it }
+                                    fanartRequest = FanartRequest(id, series = true, coverFallback = cover)
+                                }
                             }
                         )
                     }
@@ -325,8 +339,12 @@ fun HubScreen(onLogout: () -> Unit) {
                             shelves = shelves,
                             onPoster = { id -> moviesById[id]?.let { openMovie(it) } },
                             onFocusId = { id ->
-                                BackdropCache.cachedMovieFanart(id)?.let { hubBackdropUrl = it }
-                                fanartRequest = FanartRequest(id, series = false)
+                                moviesById[id]?.let { m ->
+                                    val cover = m.streamIcon?.trim()?.takeIf { it.isNotBlank() }
+                                    BackdropCache.cachedMovieFanart(id)?.let { hubBackdropUrl = it }
+                                        ?: cover?.let { hubBackdropUrl = it }
+                                    fanartRequest = FanartRequest(id, series = false, coverFallback = cover)
+                                }
                             }
                         )
                     }

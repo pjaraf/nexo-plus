@@ -429,7 +429,9 @@ class SeriesActivity : ComponentActivity() {
 
             val title = info?.displayTitle?.takeIf { it.isNotBlank() } ?: seriesName
             val cover = info?.posterUrl?.takeIf { it.isNotBlank() } ?: seriesCoverExtra
-            val backdrop = info?.fanartUrl ?: BackdropCache.cachedSeriesFanart(seriesId)
+            val backdrop = info?.fanartUrl
+                ?: BackdropCache.cachedSeriesFanart(seriesId)
+                ?: cover.takeIf { it.isNotBlank() }
             val castText = info?.cast?.takeIf { it.isNotBlank() } ?: "—"
             val plotText = info?.displayPlot
                 ?: "Disfruta de todos los episodios en alta definición."
